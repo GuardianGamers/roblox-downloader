@@ -23,8 +23,17 @@ def get_current_version(url: str) -> Optional[str]:
     """
     log("Checking current Roblox version on APKCombo...")
     
+    # Always use headless for version checking
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ]
+        )
         context = browser.new_context(
             user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
@@ -132,10 +141,13 @@ def download_with_playwright(url: str, download_dir: str) -> Optional[str]:
     """
     log(f"Navigating to: {url}")
     
+    # Check if we should run headless (e.g., in Docker)
+    headless = os.environ.get('HEADLESS', 'false').lower() == 'true'
+    
     with sync_playwright() as p:
-        # Launch browser in non-headless mode to avoid detection
+        # Launch browser (headless in Docker, visible otherwise)
         browser = p.chromium.launch(
-            headless=False,
+            headless=headless,
             args=[
                 '--disable-blink-features=AutomationControlled',
                 '--disable-dev-shm-usage',

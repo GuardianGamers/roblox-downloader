@@ -2,7 +2,33 @@
 
 This project uses Playwright with stealth mode to automatically download Roblox APK files from APKCombo.
 
-## Installation
+## Quick Start with Docker (Recommended)
+
+### Build and run:
+```bash
+make run
+```
+
+This will build the Docker image and download the latest Roblox APK to `./downloads/`
+
+### Check version only:
+```bash
+make run-check
+```
+
+### Other Docker commands:
+```bash
+make build              # Build the Docker image
+make run                # Download and extract Roblox APK
+make run-check          # Check version without downloading
+make run-custom ARGS="--force --extract"  # Run with custom arguments
+make deploy STAGE=prod  # Deploy to AWS ECR
+make build-info         # Show build information
+make clean              # Remove local Docker images
+make help               # Show all available commands
+```
+
+## Installation (Local Development)
 
 1. Install Python dependencies:
 ```bash

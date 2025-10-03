@@ -1,0 +1,110 @@
+# Variables
+DOCKERFILE=Dockerfile
+
+# Default stage is dev
+STAGE?=dev
+AWS_ACCOUNT=$(shell aws sts get-caller-identity --query Account --output text)
+AWS_REGION=us-east-1
+ECR_REGISTRY=$(AWS_ACCOUNT).dkr.ecr.$(AWS_REGION).amazonaws.com
+LOCAL_IMAGE=roblox-downloader-$(STAGE)
+
+ECR_IMAGE=$(ECR_REGISTRY)/$(LOCAL_IMAGE)
+
+VERSION?=latest
+
+# Default target
+.PHONY: help
+help:
+	@echo "Available commands:"
+	@echo "  make build [STAGE=dev|test|prod]       - Build the Docker image"
+	@echo "  make run [STAGE=dev|test|prod]         - Run the Docker container locally"
+	@echo "  make run-check [STAGE=dev|test|prod]   - Run version check only"
+	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy the Docker image to ECR"
+	@echo "  make build-info [STAGE=dev|test|prod]  - Show build information for Docker image"
+	@echo "  make clean                              - Remove local Docker images"
+	@echo "  make help                               - Show this help message"
+	@echo ""
+	@echo "Current settings:"
+	@echo "  STAGE: $(STAGE) (default: dev, options: dev, test, prod)"
+	@echo "  VERSION: $(VERSION) (default: latest)"
+	@echo "  LOCAL_IMAGE: $(LOCAL_IMAGE):$(VERSION)"
+
+# Build target
+.PHONY: build
+build:
+	@BUILD_TIMESTAMP=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
+	echo "Building roblox-downloader with timestamp: $$BUILD_TIMESTAMP"; \
+	docker build \
+		--build-arg BUILD_TIMESTAMP="$$BUILD_TIMESTAMP" \
+		--build-arg BUILD_VERSION="$(VERSION)" \
+		-t $(LOCAL_IMAGE):$(VERSION) \
+		-f $(DOCKERFILE) .
+	@echo "Image built locally: $(LOCAL_IMAGE):$(VERSION)"
+
+# Run target - downloads and extracts to local directory
+.PHONY: run
+run: build
+	@echo "Running roblox-downloader..."
+	@mkdir -p ./downloads
+	docker run --rm \
+		-v $(PWD)/downloads:/downloads \
+		$(LOCAL_IMAGE):$(VERSION)
+
+# Run version check only
+.PHONY: run-check
+run-check: build
+	@echo "Checking Roblox version..."
+	docker run --rm \
+		-v $(PWD)/downloads:/downloads \
+		$(LOCAL_IMAGE):$(VERSION) \
+		python download_roblox.py --output-dir /downloads --check-only
+
+# Run with custom arguments
+.PHONY: run-custom
+run-custom: build
+	@echo "Running with custom arguments: $(ARGS)"
+	@mkdir -p ./downloads
+	docker run --rm \
+		-v $(PWD)/downloads:/downloads \
+		$(LOCAL_IMAGE):$(VERSION) \
+		python download_roblox.py --output-dir /downloads $(ARGS)
+
+# Deploy target
+.PHONY: deploy
+deploy: build
+	@echo "Starting ECR login..."
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	@echo "Checking/creating ECR repository..."
+	aws ecr describe-repositories --repository-names $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null 2>&1 || aws ecr create-repository --repository-name $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null
+	@echo "Tagging image: $(LOCAL_IMAGE):$(VERSION) as $(ECR_IMAGE):$(VERSION)"
+	docker tag $(LOCAL_IMAGE):$(VERSION) $(ECR_IMAGE):$(VERSION)
+	@echo "Pushing image to ECR..."
+	docker push $(ECR_IMAGE):$(VERSION)
+	@echo "Image deployed: $(ECR_IMAGE):$(VERSION)"
+
+# Build info target - shows build information for Docker image
+.PHONY: build-info
+build-info:
+	@echo "Build Information for Docker Image (STAGE=$(STAGE)):"
+	@echo "================================================="
+	@echo ""
+	@echo "🔍 Image: $(LOCAL_IMAGE):$(VERSION)"
+	@if docker image inspect $(LOCAL_IMAGE):$(VERSION) >/dev/null 2>&1; then \
+		echo "  📅 Build Timestamp: $$(docker image inspect $(LOCAL_IMAGE):$(VERSION) --format '{{index .Config.Labels "build.timestamp"}}')"; \
+		echo "  🏷️  Build Version: $$(docker image inspect $(LOCAL_IMAGE):$(VERSION) --format '{{index .Config.Labels "build.version"}}')"; \
+		echo "  🔧 Component: $$(docker image inspect $(LOCAL_IMAGE):$(VERSION) --format '{{index .Config.Labels "build.component"}}')"; \
+		echo "  📊 Image Size: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.Size}}' | tail -n +2)"; \
+		echo "  🆔 Image ID: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.ID}}' | tail -n +2)"; \
+	else \
+		echo "  ❌ Image not found locally. Run 'make build' first."; \
+	fi
+	@echo ""
+	@echo "💡 To view build info at runtime, check /app/build_info.txt inside container"
+
+# Clean target - remove local images
+.PHONY: clean
+clean:
+	@echo "Removing local Docker images..."
+	@docker rmi $(LOCAL_IMAGE):$(VERSION) 2>/dev/null || echo "Image $(LOCAL_IMAGE):$(VERSION) not found"
+	@echo "Cleanup complete"
+

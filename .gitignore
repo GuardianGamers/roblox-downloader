@@ -30,6 +30,7 @@ wheels/
 debug_screenshot.png
 timeout_screenshot.png
 error_screenshot.png
+downloads/
 
 # IDE
 .vscode/
