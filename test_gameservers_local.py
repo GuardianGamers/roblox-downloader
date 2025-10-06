@@ -23,13 +23,13 @@ from update_gameservers import (
     log
 )
 
-def test_chart_scraper():
+def test_chart_scraper(pages=1):
     """Test 1: Fetch games from Roblox charts."""
     print("\n" + "="*60)
     print("TEST 1: Fetching games from Roblox charts")
     print("="*60)
     
-    games = fetch_latest_roblox_games(pages_per_category=1)  # Just 1 page for testing
+    games = fetch_latest_roblox_games(pages_per_category=pages)
     
     if games:
         print(f"✅ Successfully fetched {len(games)} games")
@@ -137,6 +137,7 @@ def main():
     parser.add_argument('--no-s3', action='store_true', help='Skip S3 operations')
     parser.add_argument('--use-s3', action='store_true', help='Use S3 instead of local directory')
     parser.add_argument('--local-dir', default='./test_gameservers', help='Local directory for testing (default: ./test_gameservers)')
+    parser.add_argument('--pages', type=int, default=1, help='Number of pages to fetch per category (default: 1)')
     
     args = parser.parse_args()
     
@@ -153,6 +154,7 @@ def main():
     print(f"AWS Region: {os.environ.get('AWS_REGION')}")
     print(f"Charts Scraper: {os.environ.get('CHARTS_SCRAPER_PATH')}")
     print(f"Local Dir: {args.local_dir}")
+    print(f"Pages per category: {args.pages}")
     print(f"Mode: {'LOCAL' if use_local else 'S3'}")
     print("="*60)
     
@@ -160,7 +162,7 @@ def main():
     games = []
     
     if args.test in ['scraper', 'all']:
-        games = test_chart_scraper()
+        games = test_chart_scraper(pages=args.pages)
     
     if args.test in ['ai', 'all']:
         if not games:
