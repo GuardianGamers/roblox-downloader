@@ -130,7 +130,7 @@ validate:
 build:
 	@echo "Building SAM application..."
 	@echo "Note: SAM will build the Docker image from the Dockerfile"
-	sam build --template template.yaml
+	sam build --template template.yaml --use-container
 
 .PHONY: deploy
 deploy: build
