@@ -141,6 +141,7 @@ deploy: build
 		--parameter-overrides Stage=$(STAGE) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--resolve-s3 \
+		--resolve-image-repos \
 		--no-fail-on-empty-changeset \
 		--tags Stage=$(STAGE) Project=roblox-downloader
 
