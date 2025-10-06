@@ -20,18 +20,19 @@ STACK_NAME=roblox-downloader-$(STAGE)
 help:
 	@echo "Available commands:"
 	@echo ""
-	@echo "Docker commands:"
-	@echo "  make build [STAGE=dev|test|prod]       - Build the Docker image"
-	@echo "  make run [STAGE=dev|test|prod]         - Run the Docker container locally"
+	@echo "Local Docker commands (for testing):"
+	@echo "  make build [STAGE=dev|test|prod]       - Build Docker image locally"
+	@echo "  make run [STAGE=dev|test|prod]         - Run container locally"
 	@echo "  make run-check [STAGE=dev|test|prod]   - Run version check only"
-	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy the Docker image to ECR"
-	@echo "  make build-info [STAGE=dev|test|prod]  - Show build information for Docker image"
+	@echo "  make build-info [STAGE=dev|test|prod]  - Show build information"
 	@echo "  make clean                              - Remove local Docker images"
 	@echo ""
-	@echo "AWS SAM commands:"
+	@echo "ECR commands (standalone, without SAM):"
+	@echo "  make deploy [STAGE=dev|test|prod]      - Push Docker image to ECR"
+	@echo ""
+	@echo "AWS SAM commands (full stack deployment):"
 	@echo "  make sam-validate                       - Validate SAM template"
-	@echo "  make sam-build [STAGE=dev|test|prod]   - Build SAM application"
-	@echo "  make sam-deploy [STAGE=dev|test|prod]  - Deploy stack to AWS"
+	@echo "  make sam-deploy [STAGE=dev|test|prod]  - Build & deploy full stack to AWS"
 	@echo "  make sam-delete [STAGE=dev|test|prod]  - Delete stack from AWS"
 	@echo "  make sam-logs [STAGE=dev|test|prod]    - Tail Lambda logs"
 	@echo "  make sam-invoke [STAGE=dev|test|prod]  - Manually invoke Lambda"
@@ -131,8 +132,9 @@ sam-validate:
 	sam validate --template template.yaml
 
 .PHONY: sam-build
-sam-build: build deploy
+sam-build:
 	@echo "Building SAM application..."
+	@echo "Note: SAM will build the Docker image from the Dockerfile"
 	sam build --template template.yaml
 
 .PHONY: sam-deploy
