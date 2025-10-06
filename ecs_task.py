@@ -108,16 +108,14 @@ def main():
         # Run the downloader
         try:
             print(f"Running command: {' '.join(cmd)}")
+            print("=" * 60)
+            # Stream output in real-time instead of capturing
             result = subprocess.run(
                 cmd,
-                capture_output=True,
                 text=True,
                 timeout=850  # Lambda timeout is 900s
             )
-            
-            print(f"STDOUT:\n{result.stdout}")
-            if result.stderr:
-                print(f"STDERR:\n{result.stderr}")
+            print("=" * 60)
             
             if result.returncode != 0:
                 return {
