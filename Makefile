@@ -57,26 +57,26 @@ docker-build:
 		-f $(DOCKERFILE) .
 	@echo "Image built locally: $(LOCAL_IMAGE):$(VERSION)"
 
-# Docker run targets (for local testing)
+# Docker run targets (for local testing - use existing image)
 .PHONY: docker-run
-docker-run: docker-build
-	@echo "Running roblox-downloader locally..."
+docker-run:
+	@echo "Running Docker container locally (for testing)..."
 	@mkdir -p ./downloads
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION)
 
 .PHONY: docker-check
-docker-check: docker-build
-	@echo "Checking Roblox version locally..."
+docker-check:
+	@echo "Checking Roblox version (local test)..."
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads --check-only
 
 .PHONY: docker-custom
-docker-custom: docker-build
-	@echo "Running locally with custom arguments: $(ARGS)"
+docker-custom:
+	@echo "Running with custom arguments: $(ARGS)"
 	@mkdir -p ./downloads
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
