@@ -274,15 +274,13 @@ class RobloxChartsScraper:
             'Sec-Fetch-Site': 'same-site'
         }
         
-        # Default parameters based on the working URL provided
+        # Default parameters for tablet resolution (matching working API calls)
         self.default_params = {
-            'sessionId': self.session_id,
-            'device': 'computer',
-            'country': 'all',
-            'cpuCores': '16',
-            'maxResolution': '2560x1440',
+            'cpuCores': '4',
+            'maxResolution': '1280x800',  # Tablet resolution
             'maxMemory': '8192',
-            'networkType': '4g'
+            'networkType': '4g',
+            'sessionId': self.session_id
         }
         
         print(f"🎮 Roblox Charts API Scraper initialized")
