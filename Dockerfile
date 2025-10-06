@@ -12,29 +12,29 @@ LABEL build.component="roblox-downloader"
 WORKDIR ${LAMBDA_TASK_ROOT}
 
 # Install system dependencies required for Playwright/Chromium
-RUN apt-get update && apt-get install -y \
+RUN yum install -y \
     wget \
     ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
+    liberation-fonts \
+    alsa-lib \
+    at-spi2-atk \
+    atk \
+    at-spi2-core \
+    cups-libs \
+    dbus-libs \
+    libdrm \
+    mesa-libgbm \
+    gtk3 \
+    nspr \
+    nss \
+    libwayland-client \
+    libXcomposite \
+    libXdamage \
+    libXfixes \
+    libxkbcommon \
+    libXrandr \
     xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
+    && yum clean all
 
 # Install Python packages
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
