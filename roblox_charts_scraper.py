@@ -89,7 +89,10 @@ def fetch_game_details_v2(universe_id):
     
     for attempt in range(max_retries):
         try:
-            response = requests.get(url)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers)
             
             if response.status_code == 200:
                 data = response.json().get("data", [])
@@ -125,7 +128,10 @@ def fetch_game_thumbnail(universe_id, place_id):
     try:
         # Method 1: Try to get image IDs from the games media API and use batch API for thumbnails
         media_url = f"https://games.roblox.com/v2/games/{universe_id}/media"
-        response = requests.get(media_url)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        response = requests.get(media_url, headers=headers)
         
         if response.status_code == 200:
             media_data = response.json()
@@ -253,6 +259,21 @@ class RobloxChartsScraper:
 
         self.rate_limit_delay = rate_limit_delay
         
+        # Browser-like headers to avoid bot detection
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Origin': 'https://www.roblox.com',
+            'Referer': 'https://www.roblox.com/',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site'
+        }
+        
         # Default parameters based on the working URL provided
         self.default_params = {
             'sessionId': self.session_id,
@@ -282,7 +303,7 @@ class RobloxChartsScraper:
                 full_url = f"{url}?{query_string}"
                 print(f"  🔗 DEBUG URL: {full_url[:100]}...")
                 
-                response = requests.get(url, params=params)
+                response = requests.get(url, params=params, headers=self.headers)
                 
                 if response.status_code == 200:
                     print(f"  ✅ API request successful")
