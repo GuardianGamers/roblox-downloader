@@ -20,7 +20,7 @@ Parameters:
   ScheduleExpression:
     Type: String
     Default: "cron(0 12 * * ? *)"
-    Description: Schedule for Lambda execution (default: daily at 12:00 UTC)
+    Description: "Schedule for Lambda execution (default: daily at 12:00 UTC)"
 
 Globals:
   Function:
