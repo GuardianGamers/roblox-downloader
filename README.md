@@ -23,12 +23,13 @@ make local-check
 
 ### All Commands:
 ```bash
-# AWS SAM deployment
-make validate           # Validate SAM template
-make build              # Build SAM application
-make deploy             # Deploy to AWS
-make logs               # View Lambda logs
-make invoke             # Manually trigger download
+# AWS ECS Fargate deployment
+make validate           # Validate CloudFormation template
+make build              # Build Docker image
+make push               # Push image to ECR
+make deploy             # Deploy to AWS (builds, pushes, deploys)
+make logs               # View ECS task logs
+make run-task           # Manually trigger download
 make status             # Show stack status
 make delete             # Delete stack
 
@@ -113,19 +114,18 @@ APKCombo protects their download links with **Cloudflare** which requires JavaSc
 
 ## AWS Deployment (Automated Daily Downloads)
 
-Deploy to AWS Lambda with scheduled daily downloads to S3:
+Deploy to AWS ECS Fargate with scheduled daily downloads to S3:
 
 ### Prerequisites:
 - AWS CLI configured
-- AWS SAM CLI installed
-- Docker running
+- Docker running (for building the image)
 
 ### Deploy:
 ```bash
 # Validate template
 make validate
 
-# Deploy to dev environment
+# Build, push to ECR, and deploy to dev environment
 make deploy STAGE=dev
 
 # Deploy to production
@@ -134,19 +134,32 @@ make deploy STAGE=prod
 
 ### What gets deployed:
 - **S3 Bucket**: `roblox-{AccountId}-{Stage}` with version-organized `/apk/{version}/` directories
-- **Lambda Function**: Docker-based function with 15 minute timeout
+- **ECS Cluster & Task Definition**: Fargate task running Chromium + Playwright
+- **ECR Repository**: Stores Docker images for the downloader
+- **VPC & Networking**: Public subnets for internet access
 - **EventBridge Rule**: Daily schedule (default: 12:00 UTC)
-- **CloudWatch Logs**: 30-day retention
-- **CloudWatch Alarm**: Alert on Lambda errors
-- **IAM Roles**: Least-privilege access to S3, SSM, and CloudWatch
+- **CloudWatch Logs**: 30-day retention for ECS task logs
+- **IAM Roles**: Least-privilege access to S3, SSM, ECR, and CloudWatch
 - **SSM Parameters**: Store bucket info and current version
 - **Version History**: Each Roblox version stored in its own directory for complete history
+
+### Why ECS Fargate instead of Lambda?
+Lambda has limitations for browser automation:
+- Amazon Linux 2 has GLIBC 2.26, but Chromium requires GLIBC 2.27+
+- Lambda has a 10GB image size limit (Chromium + dependencies are large)
+- Lambda has stricter resource constraints for long-running browser operations
+
+ECS Fargate provides:
+- Full Debian/Ubuntu base images with modern GLIBC
+- No image size limits
+- More CPU/memory for Chromium
+- Better suited for browser automation workloads
 
 ### Manage deployment:
 ```bash
 make status STAGE=dev      # Check stack status
-make logs STAGE=dev        # Tail Lambda logs
-make invoke STAGE=dev      # Manually trigger download
+make logs STAGE=dev        # Tail ECS task logs
+make run-task STAGE=dev    # Manually trigger download
 make delete STAGE=dev      # Delete stack
 ```
 
@@ -185,8 +198,8 @@ s3://roblox-{AccountId}-{Stage}/
 ## Notes
 
 - The browser will open in visible mode (not headless) for local runs
-- Lambda runs in headless mode automatically
+- ECS tasks run in headless mode automatically
 - If the download link doesn't appear, a screenshot will be saved for debugging
 - The script requires x86_64 architecture support in the downloaded APK
-- Lambda function has 15-minute timeout and 2GB memory
+- ECS Fargate task has 2 vCPU and 4GB memory allocated
 

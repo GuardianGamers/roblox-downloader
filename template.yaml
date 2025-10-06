@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Roblox Downloader - Daily APK Download to S3
+Description: Roblox Downloader - Daily APK Download to S3 using ECS Fargate
 
 Parameters:
   Stage:
@@ -20,17 +20,7 @@ Parameters:
   ScheduleExpression:
     Type: String
     Default: "cron(0 12 * * ? *)"
-    Description: "Schedule for Lambda execution (default: daily at 12:00 UTC)"
-
-Globals:
-  Function:
-    Timeout: 900
-    MemorySize: 2048
-    Environment:
-      Variables:
-        STAGE: !Ref Stage
-        BUCKET_NAME: !Ref RobloxBucket
-        HEADLESS: "true"
+    Description: "Schedule for ECS task execution (default: daily at 12:00 UTC)"
 
 Resources:
   # S3 Bucket for Roblox APKs
@@ -71,11 +61,22 @@ Resources:
         - Key: Project
           Value: roblox-downloader
 
-  # CloudWatch Log Group for Lambda
+  # ECS Cluster
+  RobloxDownloaderCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "roblox-downloader-${Stage}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # CloudWatch Log Group for ECS
   RobloxDownloaderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/lambda/roblox-downloader-${Stage}"
+      LogGroupName: !Sub "/ecs/roblox-downloader-${Stage}"
       RetentionInDays: 30
       Tags:
         - Key: Environment
@@ -83,20 +84,76 @@ Resources:
         - Key: Project
           Value: roblox-downloader
 
-  # IAM Role for Lambda
-  RobloxDownloaderRole:
+  # ECR Repository for Docker image
+  RobloxDownloaderRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "roblox-downloader-${Stage}"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 5 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # IAM Role for ECS Task Execution (pulling images, logs)
+  RobloxDownloaderExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "RobloxDownloaderRole-${Stage}"
+      RoleName: !Sub "RobloxDownloaderExecutionRole-${Stage}"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !GetAtt RobloxDownloaderRepository.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # IAM Role for ECS Task (S3, SSM access)
+  RobloxDownloaderTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "RobloxDownloaderTaskRole-${Stage}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -123,57 +180,87 @@ Resources:
                   - ssm:GetParametersByPath
                   - ssm:PutParameter
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/guardiangamer/${Stage}/roblox/*"
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !GetAtt RobloxDownloaderLogGroup.Arn
-        - PolicyName: ECRAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                  - ecr:BatchCheckLayerAvailability
-                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/roblox-downloader-${Stage}"
       Tags:
-        - Key: Name
-          Value: !Sub "RobloxDownloaderRole-${Stage}"
         - Key: Environment
           Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
 
-  # Lambda Function using Docker image
-  RobloxDownloaderFunction:
-    Type: AWS::Serverless::Function
+  # ECS Task Definition
+  RobloxDownloaderTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
     Properties:
-      FunctionName: !Sub "roblox-downloader-${Stage}"
-      PackageType: Image
-      Architectures:
-        - x86_64
-      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/roblox-downloader-${Stage}:latest"
-      Role: !GetAtt RobloxDownloaderRole.Arn
-      Timeout: 900
-      MemorySize: 2048
-      Environment:
-        Variables:
-          STAGE: !Ref Stage
-          BUCKET_NAME: !Ref RobloxBucket
-          S3_PREFIX: "apk/"
-          HEADLESS: "true"
+      Family: !Sub "roblox-downloader-${Stage}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '2048'
+      Memory: '4096'
+      ExecutionRoleArn: !GetAtt RobloxDownloaderExecutionRole.Arn
+      TaskRoleArn: !GetAtt RobloxDownloaderTaskRole.Arn
+      ContainerDefinitions:
+        - Name: roblox-downloader
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RobloxDownloaderRepository}:latest"
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RobloxDownloaderLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: STAGE
+              Value: !Ref Stage
+            - Name: BUCKET_NAME
+              Value: !Ref RobloxBucket
+            - Name: S3_PREFIX
+              Value: "apk/"
+            - Name: HEADLESS
+              Value: "true"
+            - Name: ACTION
+              Value: "download"
+            - Name: EXTRACT
+              Value: "true"
+            - Name: FORCE
+              Value: "false"
       Tags:
-        Environment: !Ref Stage
-        Project: roblox-downloader
-    Metadata:
-      DockerTag: latest
-      DockerContext: .
-      Dockerfile: Dockerfile
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # IAM Role for EventBridge to run ECS tasks
+  RobloxDownloaderEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "RobloxDownloaderEventRole-${Stage}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RunECSTask
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                Resource: !Ref RobloxDownloaderTaskDefinition
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt RobloxDownloaderExecutionRole.Arn
+                  - !GetAtt RobloxDownloaderTaskRole.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
 
   # EventBridge Rule for daily execution
   RobloxDownloaderSchedule:
@@ -184,25 +271,118 @@ Resources:
       ScheduleExpression: !Ref ScheduleExpression
       State: ENABLED
       Targets:
-        - Arn: !GetAtt RobloxDownloaderFunction.Arn
+        - Arn: !GetAtt RobloxDownloaderCluster.Arn
+          RoleArn: !GetAtt RobloxDownloaderEventRole.Arn
           Id: RobloxDownloaderTarget
-          Input: |
-            {
-              "action": "download",
-              "extract": true,
-              "force": false
-            }
+          EcsParameters:
+            TaskDefinitionArn: !Ref RobloxDownloaderTaskDefinition
+            TaskCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: ENABLED
+                Subnets:
+                  - !Ref PublicSubnet1
+                  - !Ref PublicSubnet2
+                SecurityGroups:
+                  - !Ref RobloxDownloaderSecurityGroup
 
-  # Permission for EventBridge to invoke Lambda
-  RobloxDownloaderSchedulePermission:
-    Type: AWS::Lambda::Permission
+  # VPC for ECS Tasks
+  RobloxDownloaderVPC:
+    Type: AWS::EC2::VPC
     Properties:
-      FunctionName: !Ref RobloxDownloaderFunction
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt RobloxDownloaderSchedule.Arn
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-vpc-${Stage}"
+        - Key: Environment
+          Value: !Ref Stage
 
-  # SSM Parameters for bucket information
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-igw-${Stage}"
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref RobloxDownloaderVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref RobloxDownloaderVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-public-1-${Stage}"
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref RobloxDownloaderVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-public-2-${Stage}"
+
+  # Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref RobloxDownloaderVPC
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-public-rt-${Stage}"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Group for ECS Tasks
+  RobloxDownloaderSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "roblox-downloader-sg-${Stage}"
+      GroupDescription: Security group for Roblox downloader ECS tasks
+      VpcId: !Ref RobloxDownloaderVPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "roblox-downloader-sg-${Stage}"
+        - Key: Environment
+          Value: !Ref Stage
+
+  # SSM Parameters
   RobloxBucketNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -247,7 +427,6 @@ Resources:
         Stage: !Ref Stage
         Project: roblox-downloader
 
-  # SSM Parameter to track current version
   RobloxCurrentVersionParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -258,24 +437,6 @@ Resources:
       Tags:
         Stage: !Ref Stage
         Project: roblox-downloader
-
-  # CloudWatch Alarm for Lambda failures
-  RobloxDownloaderErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "roblox-downloader-errors-${Stage}"
-      AlarmDescription: Alert when Roblox downloader Lambda encounters errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref RobloxDownloaderFunction
-      TreatMissingData: notBreaching
 
 Outputs:
   BucketName:
@@ -296,23 +457,23 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-BucketApkUrl"
   
-  LambdaFunctionName:
-    Description: Name of the Lambda function
-    Value: !Ref RobloxDownloaderFunction
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref RobloxDownloaderCluster
     Export:
-      Name: !Sub "${AWS::StackName}-LambdaFunctionName"
+      Name: !Sub "${AWS::StackName}-ECSClusterName"
   
-  LambdaFunctionArn:
-    Description: ARN of the Lambda function
-    Value: !GetAtt RobloxDownloaderFunction.Arn
+  ECSTaskDefinitionArn:
+    Description: ARN of the ECS task definition
+    Value: !Ref RobloxDownloaderTaskDefinition
     Export:
-      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+      Name: !Sub "${AWS::StackName}-ECSTaskDefinitionArn"
   
-  RoleArn:
-    Description: ARN of the Lambda execution role
-    Value: !GetAtt RobloxDownloaderRole.Arn
+  ECRRepositoryUri:
+    Description: URI of the ECR repository
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RobloxDownloaderRepository}"
     Export:
-      Name: !Sub "${AWS::StackName}-RoleArn"
+      Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
   
   LogGroupName:
     Description: Name of the CloudWatch Log Group

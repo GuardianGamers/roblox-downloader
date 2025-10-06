@@ -20,13 +20,14 @@ STACK_NAME=roblox-downloader-$(STAGE)
 help:
 	@echo "Available commands:"
 	@echo ""
-	@echo "AWS SAM deployment (recommended):"
-	@echo "  make validate                           - Validate SAM template"
-	@echo "  make build [STAGE=dev|test|prod]       - Build SAM application"
+	@echo "AWS ECS Fargate deployment (recommended):"
+	@echo "  make validate                           - Validate CloudFormation template"
+	@echo "  make build [STAGE=dev|test|prod]       - Build Docker image"
+	@echo "  make push [STAGE=dev|test|prod]        - Push image to ECR"
 	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy full stack to AWS"
 	@echo "  make delete [STAGE=dev|test|prod]      - Delete stack from AWS"
-	@echo "  make logs [STAGE=dev|test|prod]        - Tail Lambda logs"
-	@echo "  make invoke [STAGE=dev|test|prod]      - Manually invoke Lambda"
+	@echo "  make logs [STAGE=dev|test|prod]        - Tail ECS task logs"
+	@echo "  make run-task [STAGE=dev|test|prod]    - Manually run ECS task"
 	@echo "  make status [STAGE=dev|test|prod]      - Show stack status"
 	@echo ""
 	@echo "Local Docker testing:"
@@ -120,30 +121,37 @@ local-clean:
 	@docker rmi $(LOCAL_IMAGE):$(VERSION) 2>/dev/null || echo "Image $(LOCAL_IMAGE):$(VERSION) not found"
 	@echo "Cleanup complete"
 
-# SAM targets (main deployment workflow)
+# AWS deployment targets
 .PHONY: validate
 validate:
-	@echo "Validating SAM template..."
-	sam validate --template template.yaml
+	@echo "Validating CloudFormation template..."
+	aws cloudformation validate-template --template-body file://template.yaml > /dev/null
+	@echo "Template is valid!"
 
 .PHONY: build
-build:
-	@echo "Building SAM application..."
-	@echo "Note: SAM will build the Docker image from the Dockerfile"
-	sam build --template template.yaml --use-container
+build: local-build
+	@echo "Tagging image for ECR..."
+	docker tag $(LOCAL_IMAGE):$(VERSION) $(ECR_IMAGE):latest
+
+.PHONY: push
+push: build
+	@echo "Pushing Docker image to ECR..."
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	aws ecr describe-repositories --repository-names roblox-downloader-$(STAGE) --region $(AWS_REGION) > /dev/null 2>&1 || \
+		aws ecr create-repository --repository-name roblox-downloader-$(STAGE) --region $(AWS_REGION)
+	docker push $(ECR_IMAGE):latest
+	@echo "Image pushed: $(ECR_IMAGE):latest"
 
 .PHONY: deploy
-deploy: build
-	@echo "Deploying SAM application to AWS (STAGE=$(STAGE))..."
-	sam deploy \
-		--template template.yaml \
+deploy: push
+	@echo "Deploying CloudFormation stack (STAGE=$(STAGE))..."
+	aws cloudformation deploy \
+		--template-file template.yaml \
 		--stack-name $(STACK_NAME) \
 		--parameter-overrides Stage=$(STAGE) \
 		--capabilities CAPABILITY_NAMED_IAM \
-		--resolve-s3 \
-		--resolve-image-repos \
-		--no-fail-on-empty-changeset \
 		--tags Stage=$(STAGE) Project=roblox-downloader
+	@echo "Deployment complete!"
 
 .PHONY: delete
 delete:
@@ -161,20 +169,24 @@ delete:
 
 .PHONY: logs
 logs:
-	@echo "Tailing Lambda logs for $(STACK_NAME)..."
-	sam logs --stack-name $(STACK_NAME) --tail
+	@echo "Fetching ECS task logs for $(STACK_NAME)..."
+	@CLUSTER=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) --query 'Stacks[0].Outputs[?OutputKey==`ECSClusterName`].OutputValue' --output text); \
+	aws logs tail /ecs/roblox-downloader-$(STAGE) --follow
 
-.PHONY: invoke
-invoke:
-	@echo "Invoking Lambda function..."
-	aws lambda invoke \
-		--function-name roblox-downloader-$(STAGE) \
-		--payload '{"action":"download","extract":true,"force":false}' \
-		--cli-binary-format raw-in-base64-out \
-		response.json
-	@echo "Response:"
-	@cat response.json
-	@rm response.json
+.PHONY: run-task
+run-task:
+	@echo "Manually running ECS task..."
+	@CLUSTER=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) --query 'Stacks[0].Outputs[?OutputKey==`ECSClusterName`].OutputValue' --output text); \
+	TASK_DEF=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) --query 'Stacks[0].Outputs[?OutputKey==`ECSTaskDefinitionArn`].OutputValue' --output text); \
+	SUBNETS=$$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=roblox-downloader-public-*-$(STAGE)" --query 'Subnets[*].SubnetId' --output text | tr '\t' ','); \
+	SG=$$(aws ec2 describe-security-groups --filters "Name=tag:Name,Values=roblox-downloader-sg-$(STAGE)" --query 'SecurityGroups[0].GroupId' --output text); \
+	aws ecs run-task \
+		--cluster $$CLUSTER \
+		--task-definition $$TASK_DEF \
+		--launch-type FARGATE \
+		--network-configuration "awsvpcConfiguration={subnets=[$$SUBNETS],securityGroups=[$$SG],assignPublicIp=ENABLED}" \
+		--count 1
+	@echo "Task started!"
 
 .PHONY: status
 status:

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-AWS Lambda handler for Roblox APK downloader.
-This handler runs the download_roblox.py script and uploads results to S3.
+AWS ECS Task for Roblox APK downloader.
+This task runs the download_roblox.py script and uploads results to S3.
 """
 
 import os
+import sys
 import json
 import boto3
 import subprocess
@@ -56,18 +57,18 @@ def upload_to_s3(local_path, bucket_name, s3_key):
         print(f"Error uploading to S3: {e}")
         return False
 
-def handler(event, context):
+def main():
     """
-    Lambda handler for Roblox downloader.
+    ECS Task for Roblox downloader.
+    Reads configuration from environment variables.
+    """
+    # Get action from environment variable (default: download)
+    action = os.environ.get('ACTION', 'download')
+    extract = os.environ.get('EXTRACT', 'true').lower() == 'true'
+    force = os.environ.get('FORCE', 'false').lower() == 'true'
     
-    Event format:
-    {
-        "action": "download",  # or "check"
-        "extract": true,
-        "force": false
-    }
-    """
-    print(f"Event: {json.dumps(event)}")
+    print(f"Starting Roblox downloader task...")
+    print(f"Action: {action}, Extract: {extract}, Force: {force}")
     
     # Get configuration from environment
     stage = os.environ.get('STAGE', 'dev')
@@ -221,21 +222,13 @@ def handler(event, context):
             })
         }
 
-# For local testing
 if __name__ == "__main__":
-    # Test event
-    test_event = {
-        "action": "download",
-        "extract": True,
-        "force": False
-    }
-    
-    # Mock context
-    class Context:
-        function_name = "roblox-downloader-dev"
-        memory_limit_in_mb = 2048
-        invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:roblox-downloader-dev"
-        aws_request_id = "test-request-id"
-    
-    result = handler(test_event, Context())
-    print(json.dumps(result, indent=2))
+    try:
+        result = main()
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result.get('statusCode') == 200 else 1)
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

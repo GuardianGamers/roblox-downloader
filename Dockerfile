@@ -1,4 +1,4 @@
-FROM public.ecr.aws/lambda/python:3.11
+FROM python:3.11-slim
 
 # Build arguments for timestamp
 ARG BUILD_TIMESTAMP
@@ -9,52 +9,53 @@ LABEL build.timestamp="${BUILD_TIMESTAMP}"
 LABEL build.version="${BUILD_VERSION}"
 LABEL build.component="roblox-downloader"
 
-WORKDIR ${LAMBDA_TASK_ROOT}
+WORKDIR /app
 
 # Install system dependencies required for Playwright/Chromium
-RUN yum install -y \
+RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
-    liberation-fonts \
-    alsa-lib \
-    at-spi2-atk \
-    atk \
-    at-spi2-core \
-    cups-libs \
-    dbus-libs \
-    libdrm \
-    mesa-libgbm \
-    gtk3 \
-    nspr \
-    nss \
-    libwayland-client \
-    libXcomposite \
-    libXdamage \
-    libXfixes \
-    libxkbcommon \
-    libXrandr \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libwayland-client0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
     xdg-utils \
-    && yum clean all
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
-COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 # Install Playwright browsers
 RUN playwright install chromium && \
     playwright install-deps chromium
 
 # Copy application files
-COPY download_roblox.py ${LAMBDA_TASK_ROOT}/download_roblox.py
-COPY lambda_handler.py ${LAMBDA_TASK_ROOT}/lambda_handler.py
+COPY download_roblox.py /app/download_roblox.py
+COPY ecs_task.py /app/ecs_task.py
 
 # Create output directory
 RUN mkdir -p /downloads
 
 # Create a build info file for runtime access
-RUN echo "Build Timestamp: ${BUILD_TIMESTAMP}" > ${LAMBDA_TASK_ROOT}/build_info.txt && \
-    echo "Build Version: ${BUILD_VERSION}" >> ${LAMBDA_TASK_ROOT}/build_info.txt && \
-    echo "Component: roblox-downloader" >> ${LAMBDA_TASK_ROOT}/build_info.txt
+RUN echo "Build Timestamp: ${BUILD_TIMESTAMP}" > /app/build_info.txt && \
+    echo "Build Version: ${BUILD_VERSION}" >> /app/build_info.txt && \
+    echo "Component: roblox-downloader" >> /app/build_info.txt
 
 # Set default output directory
 ENV OUTPUT_DIR=/downloads
@@ -62,6 +63,6 @@ ENV OUTPUT_DIR=/downloads
 # Set headless mode for Docker (no display available)
 ENV HEADLESS=true
 
-# Set Lambda handler
-CMD ["lambda_handler.handler"]
+# Run the ECS task script
+CMD ["python", "/app/ecs_task.py"]
 
