@@ -137,7 +137,7 @@ def main():
     parser.add_argument('--no-s3', action='store_true', help='Skip S3 operations')
     parser.add_argument('--use-s3', action='store_true', help='Use S3 instead of local directory')
     parser.add_argument('--local-dir', default='./test_gameservers', help='Local directory for testing (default: ./test_gameservers)')
-    parser.add_argument('--pages', type=int, default=1, help='Number of pages to fetch per category (default: 1)')
+    parser.add_argument('--pages', type=int, default=10, help='Number of pages to fetch per category (default: 10)')
     
     args = parser.parse_args()
     
