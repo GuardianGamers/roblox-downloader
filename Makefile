@@ -64,13 +64,20 @@ docker-run:
 	@mkdir -p ./downloads
 	docker run --rm \
 		-e PYTHONUNBUFFERED=1 \
+		-e AWS_REGION=$(AWS_REGION) \
+		-e AWS_ACCESS_KEY_ID \
+		-e AWS_SECRET_ACCESS_KEY \
+		-e AWS_SESSION_TOKEN \
+		-e BUCKET_NAME=test-bucket-local \
 		-v $(PWD)/downloads:/downloads \
+		-v ~/.aws:/root/.aws:ro \
 		$(LOCAL_IMAGE):$(VERSION)
 
 .PHONY: docker-check
 docker-check:
 	@echo "Checking Roblox version (local test)..."
 	docker run --rm \
+		-e PYTHONUNBUFFERED=1 \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads --check-only
