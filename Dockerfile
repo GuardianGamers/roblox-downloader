@@ -64,6 +64,7 @@ ENV OUTPUT_DIR=/downloads
 # Set headless mode to false (use Xvfb for virtual display)
 ENV HEADLESS=false
 ENV DISPLAY=:99
+ENV PYTHONUNBUFFERED=1
 
 # Run the ECS task script with Xvfb (virtual framebuffer for non-headless browser)
 CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1920x1080x24", "python", "/app/ecs_task.py"]

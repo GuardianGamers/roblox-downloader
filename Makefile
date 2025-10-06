@@ -63,6 +63,7 @@ docker-run:
 	@echo "Running Docker container locally (for testing)..."
 	@mkdir -p ./downloads
 	docker run --rm \
+		-e PYTHONUNBUFFERED=1 \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION)
 
