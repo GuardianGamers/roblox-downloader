@@ -57,6 +57,54 @@ def upload_to_s3(local_path, bucket_name, s3_key):
         print(f"Error uploading to S3: {e}")
         return False
 
+def get_current_version_from_apkcombo():
+    """Get the current Roblox version from APKCombo."""
+    try:
+        print("Checking current Roblox version on APKCombo...")
+        result = subprocess.run(
+            ['python', '/app/download_roblox.py', '--check-only', '--output-dir', '/tmp'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        # Parse version from output
+        for line in result.stdout.split('\n'):
+            if 'Found version from page:' in line:
+                version = line.split('Found version from page:')[1].strip()
+                print(f"Current APKCombo version: {version}")
+                return version
+        
+        print("Could not determine version from APKCombo")
+        return None
+    except Exception as e:
+        print(f"Error checking version: {e}")
+        return None
+
+def version_exists_in_s3(bucket_name, s3_prefix, version):
+    """Check if a specific version already exists in S3."""
+    try:
+        # Check if the version directory exists and has files
+        version_prefix = f"{s3_prefix}{version}/"
+        print(f"Checking if version {version} exists in S3: s3://{bucket_name}/{version_prefix}")
+        
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=version_prefix,
+            MaxKeys=1
+        )
+        
+        exists = response.get('KeyCount', 0) > 0
+        if exists:
+            print(f"✓ Version {version} already exists in S3")
+        else:
+            print(f"✗ Version {version} not found in S3")
+        
+        return exists
+    except Exception as e:
+        print(f"Error checking S3: {e}")
+        return False
+
 def main():
     """
     ECS Task for Roblox downloader.
@@ -100,10 +148,33 @@ def main():
             if force:
                 cmd.append('--force')
         
-        # Get current version from SSM
-        version_param = f"/guardiangamer/{stage}/roblox/current-version"
-        current_version = get_ssm_parameter(version_param, "0.0.0")
-        print(f"Current version in SSM: {current_version}")
+        # Get current version from APKCombo
+        current_apkcombo_version = get_current_version_from_apkcombo()
+        
+        if not current_apkcombo_version:
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'Could not determine current version from APKCombo'})
+            }
+        
+        # Check if this version already exists in S3
+        if version_exists_in_s3(bucket_name, s3_prefix, current_apkcombo_version) and not force:
+            print(f"Version {current_apkcombo_version} already exists in S3. Skipping download.")
+            
+            # Update SSM parameter with current version
+            version_param = f"/guardiangamer/{stage}/roblox/current-version"
+            put_ssm_parameter(version_param, current_apkcombo_version)
+            
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'Version already exists in S3',
+                    'version': current_apkcombo_version,
+                    'skipped': True
+                })
+            }
+        
+        print(f"Proceeding with download of version {current_apkcombo_version}")
         
         # Run the downloader
         try:
