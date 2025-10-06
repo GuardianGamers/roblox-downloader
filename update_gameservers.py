@@ -58,7 +58,7 @@ def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None
         # Fetch games from all categories
         log(f"Fetching {pages_per_category} pages per category...")
         all_games = scraper.fetch_all_categories(
-            pages_per_category=pages_per_category,
+            max_pages_per_category=pages_per_category,
             specific_categories=None  # Fetch all categories
         )
         
