@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import glob
 from pathlib import Path
+from update_gameservers import update_gameservers
 
 s3_client = boto3.client('s3')
 ssm_client = boto3.client('ssm')
@@ -114,7 +115,7 @@ def main():
     action = os.environ.get('ACTION', 'download')
     extract = os.environ.get('EXTRACT', 'true').lower() == 'true'
     force = os.environ.get('FORCE', 'false').lower() == 'true'
-    
+    update_games = os.environ.get('UPDATE_GAMESERVERS', 'true').lower() == 'true'    
     print(f"Starting Roblox downloader task...")
     print(f"Action: {action}, Extract: {extract}, Force: {force}")
     
@@ -274,7 +275,7 @@ def main():
         if new_version != "unknown":
             put_ssm_parameter(version_param, new_version)
         
-        return {
+        result = {
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Download successful',
@@ -285,6 +286,25 @@ def main():
                 's3_url': f"s3://{bucket_name}/{s3_key}"
             })
         }
+        
+        # Update gameservers if requested
+        if update_games and action in ['all', 'gameservers']:
+            print("\n" + "=" * 60)
+            print("UPDATING GAMESERVERS")
+            print("=" * 60)
+            
+            gameservers_result = update_gameservers(
+                bucket_name=bucket_name,
+                s3_prefix=""  # Store in root of bucket under gameservers/
+            )
+            
+            # Merge results
+            result_body = json.loads(result['body'])
+            gameservers_body = json.loads(gameservers_result['body'])
+            result_body['gameservers'] = gameservers_body
+            result['body'] = json.dumps(result_body)
+        
+        return result
 
 if __name__ == "__main__":
     try:

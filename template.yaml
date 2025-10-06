@@ -141,6 +141,7 @@ Resources:
                   - s3:PutObject
                   - s3:DeleteObject
                   - s3:ListBucket
+                  - s3:ListObjectsV2
                   - s3:HeadObject
                 Resource:
                   - !GetAtt RobloxBucket.Arn
@@ -156,6 +157,15 @@ Resources:
                   - ssm:GetParametersByPath
                   - ssm:PutParameter
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/guardiangamer/${Stage}/roblox/*"
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"
       Tags:
         - Key: Environment
           Value: !Ref Stage
@@ -194,11 +204,13 @@ Resources:
             - Name: HEADLESS
               Value: "true"
             - Name: ACTION
-              Value: "download"
+              Value: "all"
             - Name: EXTRACT
               Value: "true"
             - Name: FORCE
               Value: "false"
+            - Name: UPDATE_GAMESERVERS
+              Value: "true"
       Tags:
         - Key: Environment
           Value: !Ref Stage

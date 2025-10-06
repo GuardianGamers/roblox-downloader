@@ -133,15 +133,20 @@ make deploy STAGE=prod
 ```
 
 ### What gets deployed:
-- **S3 Bucket**: `roblox-{AccountId}-{Stage}` with version-organized `/apk/{version}/` directories
-- **ECS Cluster & Task Definition**: Fargate task running Chromium + Playwright
+- **S3 Bucket**: `roblox-{AccountId}-{Stage}` with:
+  - `/apk/{version}/` - Version-organized Roblox APKs
+  - `/gameservers/{YYYY-MM-DD}/` - Daily gameservers.json snapshots
+- **ECS Cluster & Task Definition**: Fargate task running:
+  - Chromium + Playwright for APK downloads
+  - Roblox Charts API scraper
+  - AWS Bedrock Claude for AI content moderation
 - **ECR Repository**: Stores Docker images for the downloader
 - **VPC & Networking**: Public subnets for internet access
 - **EventBridge Rule**: Daily schedule (default: 12:00 UTC)
 - **CloudWatch Logs**: 30-day retention for ECS task logs
-- **IAM Roles**: Least-privilege access to S3, SSM, ECR, and CloudWatch
+- **IAM Roles**: Least-privilege access to S3, SSM, ECR, CloudWatch, and Bedrock
 - **SSM Parameters**: Store bucket info and current version
-- **Version History**: Each Roblox version stored in its own directory for complete history
+- **Version History**: Complete history of APK versions and daily gameserver snapshots
 
 ### Why ECS Fargate instead of Lambda?
 Lambda has limitations for browser automation:

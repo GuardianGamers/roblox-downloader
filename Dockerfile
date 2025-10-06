@@ -49,6 +49,7 @@ RUN playwright install chromium && \
 # Copy application files
 COPY download_roblox.py /app/download_roblox.py
 COPY ecs_task.py /app/ecs_task.py
+COPY update_gameservers.py /app/update_gameservers.py
 
 # Create output directory
 RUN mkdir -p /downloads
