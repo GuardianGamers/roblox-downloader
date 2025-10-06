@@ -95,22 +95,27 @@ def test_s3_operations(use_s3=True):
     except Exception as e:
         print(f"⚠️  Could not load exclusions (likely first run): {e}")
 
-def test_full_flow(dry_run=True):
+def test_full_flow(use_local=True):
     """Test 4: Run the full update flow."""
     print("\n" + "="*60)
     print("TEST 4: Full gameservers update flow")
     print("="*60)
     
     bucket_name = os.environ.get('BUCKET_NAME')
+    local_dir = './test_gameservers' if use_local else None
     
-    if dry_run:
-        print("\n⚠️  DRY RUN MODE - No data will be saved to S3")
-        print("Set dry_run=False to actually save to S3\n")
+    if use_local:
+        print(f"\n✅ LOCAL MODE - Using directory: {local_dir}")
+        print("Previous data will be loaded from test_gameservers/2025-10-05/")
+        print("New data will be saved to test_gameservers/{today}/\n")
+    else:
+        print(f"\n⚠️  S3 MODE - Will write to S3 bucket: {bucket_name}\n")
     
     try:
         result = update_gameservers(
             bucket_name=bucket_name,
-            s3_prefix=""
+            s3_prefix="",
+            local_dir=local_dir
         )
         
         print("\n✅ Full flow completed!")
@@ -130,16 +135,16 @@ def main():
                        default='all', help='Which test to run')
     parser.add_argument('--bucket', help='S3 bucket name (default: test-roblox-local)')
     parser.add_argument('--no-s3', action='store_true', help='Skip S3 operations')
-    parser.add_argument('--dry-run', action='store_true', help='Dry run (no S3 writes)', default=True)
-    parser.add_argument('--live', action='store_true', help='Actually write to S3 (disables dry-run)')
+    parser.add_argument('--use-s3', action='store_true', help='Use S3 instead of local directory')
+    parser.add_argument('--local-dir', default='./test_gameservers', help='Local directory for testing (default: ./test_gameservers)')
     
     args = parser.parse_args()
     
     if args.bucket:
         os.environ['BUCKET_NAME'] = args.bucket
     
-    dry_run = not args.live
-    use_s3 = not args.no_s3
+    use_local = not args.use_s3
+    use_s3 = not args.no_s3 and args.use_s3
     
     print("="*60)
     print("GAMESERVERS LOCAL TEST")
@@ -147,8 +152,8 @@ def main():
     print(f"Bucket: {os.environ.get('BUCKET_NAME')}")
     print(f"AWS Region: {os.environ.get('AWS_REGION')}")
     print(f"Charts Scraper: {os.environ.get('CHARTS_SCRAPER_PATH')}")
-    print(f"S3 Operations: {'Enabled' if use_s3 else 'Disabled'}")
-    print(f"Mode: {'DRY RUN' if dry_run else 'LIVE (will write to S3)'}")
+    print(f"Local Dir: {args.local_dir}")
+    print(f"Mode: {'LOCAL' if use_local else 'S3'}")
     print("="*60)
     
     # Run tests based on selection
@@ -167,10 +172,7 @@ def main():
         test_s3_operations(use_s3=True)
     
     if args.test in ['full', 'all']:
-        if not use_s3:
-            print("\n⚠️  Full flow test requires S3, skipping")
-        else:
-            test_full_flow(dry_run=dry_run)
+        test_full_flow(use_local=use_local)
     
     print("\n" + "="*60)
     print("TESTS COMPLETE")

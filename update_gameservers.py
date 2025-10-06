@@ -158,17 +158,50 @@ Respond ONLY with valid JSON in this exact format:
             "reasoning": f"AI analysis failed: {str(e)}"
         }
 
-def load_exclusion_list(bucket_name: str, s3_prefix: str) -> Set[str]:
+def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None) -> Set[str]:
     """
-    Load exclusion list of place IDs from S3 (most recent version).
+    Load exclusion list of place IDs from S3 or local directory (most recent version).
     
     Args:
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix for gameservers data
+        local_dir: Optional local directory path for testing (overrides S3)
         
     Returns:
         Set of excluded place IDs
     """
+    # Use local directory if specified (for testing)
+    if local_dir:
+        try:
+            gameservers_dir = Path(local_dir)
+            if not gameservers_dir.exists():
+                log(f"Local directory not found: {local_dir}")
+                return set()
+            
+            # Find most recent date directory
+            date_dirs = sorted([d for d in gameservers_dir.iterdir() if d.is_dir()], reverse=True)
+            if not date_dirs:
+                log("No previous gameservers data found in local directory")
+                return set()
+            
+            latest_dir = date_dirs[0]
+            exclusion_file = latest_dir / "exclusions.json"
+            
+            if not exclusion_file.exists():
+                log(f"No exclusions file found in {latest_dir}")
+                return set()
+            
+            log(f"Loading exclusion list from {exclusion_file}")
+            with open(exclusion_file, 'r') as f:
+                exclusions_data = json.load(f)
+            
+            return set(exclusions_data.get('excluded_place_ids', []))
+            
+        except Exception as e:
+            log(f"Error loading local exclusion list: {e}")
+            return set()
+    
+    # Use S3 for production
     try:
         # List all gameservers directories (sorted by date)
         response = s3_client.list_objects_v2(
@@ -206,27 +239,55 @@ def save_gameservers_to_s3(
     games: List[Dict],
     exclusions: Set[str],
     bucket_name: str,
-    s3_prefix: str
+    s3_prefix: str,
+    local_dir: str = None
 ) -> str:
     """
-    Save updated gameservers.json and exclusions to S3 with today's date.
+    Save updated gameservers.json and exclusions to S3 or local directory with today's date.
     
     Args:
         games: List of game data
         exclusions: Set of excluded place IDs
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix for gameservers data
+        local_dir: Optional local directory path for testing (overrides S3)
         
     Returns:
-        S3 path where data was saved
+        Path where data was saved
     """
     today = datetime.utcnow().strftime('%Y-%m-%d')
+    
+    gameservers_data = json.dumps(games, indent=2)
+    exclusions_data = json.dumps({
+        "excluded_place_ids": list(exclusions),
+        "last_updated": datetime.utcnow().isoformat(),
+        "count": len(exclusions)
+    }, indent=2)
+    
+    # Use local directory if specified (for testing)
+    if local_dir:
+        daily_dir = Path(local_dir) / today
+        daily_dir.mkdir(parents=True, exist_ok=True)
+        
+        log(f"Saving gameservers data to {daily_dir}")
+        
+        # Save gameservers.json
+        with open(daily_dir / "gameservers.json", 'w') as f:
+            f.write(gameservers_data)
+        
+        # Save exclusions.json
+        with open(daily_dir / "exclusions.json", 'w') as f:
+            f.write(exclusions_data)
+        
+        log(f"Saved {len(games)} games and {len(exclusions)} exclusions locally")
+        return str(daily_dir)
+    
+    # Use S3 for production
     daily_prefix = f"{s3_prefix}gameservers/{today}/"
     
     log(f"Saving gameservers data to {daily_prefix}")
     
     # Save gameservers.json
-    gameservers_data = json.dumps(games, indent=2)
     s3_client.put_object(
         Bucket=bucket_name,
         Key=f"{daily_prefix}gameservers.json",
@@ -236,11 +297,6 @@ def save_gameservers_to_s3(
     )
     
     # Save exclusions.json
-    exclusions_data = json.dumps({
-        "excluded_place_ids": list(exclusions),
-        "last_updated": datetime.utcnow().isoformat(),
-        "count": len(exclusions)
-    }, indent=2)
     s3_client.put_object(
         Bucket=bucket_name,
         Key=f"{daily_prefix}exclusions.json",
@@ -252,13 +308,14 @@ def save_gameservers_to_s3(
     log(f"Saved {len(games)} games and {len(exclusions)} exclusions")
     return daily_prefix
 
-def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/") -> Dict:
+def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_dir: str = None) -> Dict:
     """
     Main function to update gameservers data.
     
     Args:
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix
+        local_dir: Optional local directory for testing (overrides S3)
         
     Returns:
         Dict with status and statistics
@@ -268,7 +325,7 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/") -> Dic
     log("=" * 60)
     
     # Load existing exclusion list
-    existing_exclusions = load_exclusion_list(bucket_name, s3_prefix)
+    existing_exclusions = load_exclusion_list(bucket_name, s3_prefix, local_dir=local_dir)
     log(f"Loaded {len(existing_exclusions)} existing exclusions")
     
     # Fetch latest games from Roblox
@@ -313,22 +370,25 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/") -> Dic
         else:
             processed_games.append(game)
     
-    # Save to S3
-    s3_path = save_gameservers_to_s3(processed_games, new_exclusions, bucket_name, s3_prefix)
+    # Save to S3 or local directory
+    save_path = save_gameservers_to_s3(processed_games, new_exclusions, bucket_name, s3_prefix, local_dir=local_dir)
     
     log("=" * 60)
     log(f"Gameservers update complete!")
     log(f"  Processed: {len(raw_games)} games")
     log(f"  Approved: {len(processed_games)} games")
     log(f"  Excluded: {len(new_exclusions)} total ({len(new_exclusions) - len(existing_exclusions)} new)")
-    log(f"  S3 path: s3://{bucket_name}/{s3_path}")
+    if local_dir:
+        log(f"  Local path: {save_path}")
+    else:
+        log(f"  S3 path: s3://{bucket_name}/{save_path}")
     log("=" * 60)
     
     return {
         'statusCode': 200,
         'body': json.dumps({
             'message': 'Gameservers updated successfully',
-            's3_path': s3_path,
+            'save_path': save_path,
             'stats': {
                 'total_games': len(raw_games),
                 'approved_games': len(processed_games),
@@ -342,10 +402,20 @@ if __name__ == "__main__":
     # For standalone testing
     import argparse
     parser = argparse.ArgumentParser(description='Update gameservers data')
-    parser.add_argument('--bucket', required=True, help='S3 bucket name')
+    parser.add_argument('--bucket', help='S3 bucket name (not needed for local testing)')
     parser.add_argument('--prefix', default='gameservers/', help='S3 prefix')
+    parser.add_argument('--local-dir', help='Local directory for testing (overrides S3)')
     
     args = parser.parse_args()
-    result = update_gameservers(args.bucket, args.prefix)
+    
+    # Require either bucket or local-dir
+    if not args.bucket and not args.local_dir:
+        parser.error('Either --bucket or --local-dir must be specified')
+    
+    result = update_gameservers(
+        bucket_name=args.bucket or 'test-bucket',
+        s3_prefix=args.prefix,
+        local_dir=args.local_dir
+    )
     print(json.dumps(result, indent=2))
     sys.exit(0 if result['statusCode'] == 200 else 1)

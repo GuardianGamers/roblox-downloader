@@ -1,0 +1,17 @@
+[
+  {
+    "game": "roblox",
+    "id": "roblox79546208627805",
+    "name": "[🎣] 99 Nights in the Forest 🔦",
+    "description": "Build a camp with friends. Something is watching you.",
+    "categories": ["top-trending"],
+    "access": "public",
+    "img": "https://tr.rbxcdn.com/180DAY-643b9b9285f3bd9b63cf392db12a4d87/768/432/Image/Webp/noFilter",
+    "url": "79546208627805",
+    "stages": ["dev", "test", "prod"],
+    "universe_id": 7326934954,
+    "place_id": 79546208627805,
+    "player_count": 1835415,
+    "ai_flags": []
+  }
+]
