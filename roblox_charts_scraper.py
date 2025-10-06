@@ -448,68 +448,169 @@ class RobloxChartsScraper:
         """
         Fetch games from all available categories.
         
+        The 2024 API returns ALL categories in a SINGLE response, with pagination support!
+        
         Args:
-            max_pages_per_category: Maximum pages to fetch per category
+            max_pages_per_category: Maximum number of pages to fetch
             
         Returns:
             List of all unique games across categories
         """
-        print(f"🚀 COMPREHENSIVE CATEGORY SCRAPING")
-        print(f"📊 Fetching up to {max_pages_per_category} pages per category")
+        print(f"🚀 COMPREHENSIVE CATEGORY SCRAPING (2024 API Format)")
+        print(f"📊 Fetching up to {max_pages_per_category} pages")
         print("=" * 60)
         
-        # Discover available categories
-        sort_ids = self.discover_sort_ids()
-        if not sort_ids:
-            print("❌ No categories discovered")
-            return []
-        
         all_games = []
-        games_by_universe_id = {}  # Track games by universe_id for merging
+        games_by_universe_id = {}  # Track games by universe_id for deduplication
+        page_count = 0
+        page_token = None
         
-        for i, sort_info in enumerate(sort_ids, 1):
-            sort_id = sort_info['sortId']
-            sort_name = sort_info['sortDisplayName']
+        # Fetch pages until we hit the limit or run out of data
+        while page_count < max_pages_per_category:
+            page_count += 1
+            print(f"\n📄 Fetching page {page_count}/{max_pages_per_category}...")
             
-            print(f"\n🎯 [{i}/{len(sort_ids)}] Processing category: '{sort_name}'")
+            # Build parameters
+            params = self.default_params.copy()
+            if page_token:
+                params['sortsPageToken'] = page_token
             
-            # Fetch games from this category
-            category_games = self.fetch_category_games(sort_id, sort_name, max_pages_per_category)
+            # Make the API request
+            data = self._make_request_with_retry(f"{self.base_url}/get-sorts", params)
+            if not data:
+                print(f"❌ Failed to fetch page {page_count}")
+                break
             
-            # Process games and merge categories for duplicates
-            new_global_games = 0
-            updated_games = 0
-            for game in category_games:
-                universe_id = game.get('universeId')
-                if not universe_id:
+            # Extract all sorts from this page
+            sorts_data = data.get('sorts', [])
+            if not sorts_data:
+                print(f"ℹ️  No sorts data on page {page_count}")
+                break
+            
+            print(f"  📊 Found {len(sorts_data)} sorts/categories on this page")
+            
+            # Process each sort (category)
+            for sort_info in sorts_data:
+                sort_id = sort_info.get('sortId')
+                sort_name = sort_info.get('sortDisplayName', 'Unknown')
+                content_type = sort_info.get('contentType')
+                
+                # Skip non-game sorts (like "Filters")
+                if content_type != 'Games':
                     continue
                 
-                if universe_id in games_by_universe_id:
-                    # Game already exists - merge categories
-                    existing_game = games_by_universe_id[universe_id]
-                    existing_categories = existing_game.get('categories', [])
+                games = sort_info.get('games', [])
+                if not games:
+                    continue
+                
+                print(f"    • {sort_name} ({sort_id}): {len(games)} games")
+                
+                # Add games to our collection (with deduplication and category tracking)
+                new_games = 0
+                updated_games = 0
+                for game in games:
+                    universe_id = game.get('universeId')
+                    if not universe_id:
+                        continue
                     
-                    # Add new chart category if not already present
-                    if sort_id not in existing_categories:
-                        existing_categories.append(sort_id)
-                        existing_game['categories'] = existing_categories
-                        updated_games += 1
-                        print(f"    🔄 Updated game '{game.get('name', 'Unknown')}' with chart '{sort_id}'")
-                else:
-                    # New game - add to collection
-                    all_games.append(game)
-                    games_by_universe_id[universe_id] = game
-                    new_global_games += 1
+                    if universe_id in games_by_universe_id:
+                        # Game already exists - add this category to its list
+                        existing_game = games_by_universe_id[universe_id]
+                        existing_categories = existing_game.get('categories', [])
+                        
+                        if sort_id not in existing_categories:
+                            existing_categories.append(sort_id)
+                            existing_game['categories'] = existing_categories
+                            updated_games += 1
+                    else:
+                        # New game - add to collection with initial category
+                        game['categories'] = [sort_id]
+                        game['roblox_sort_id'] = sort_id  # Primary category
+                        game['roblox_sort_name'] = sort_name
+                        all_games.append(game)
+                        games_by_universe_id[universe_id] = game
+                        new_games += 1
+                
+                if new_games > 0 or updated_games > 0:
+                    print(f"      + {new_games} new | {updated_games} updated")
             
-            print(f"  📈 Added {new_global_games} new games to global collection")
-            print(f"  🔄 Updated {updated_games} existing games with new chart categories")
-            print(f"  🎮 Total unique games: {len(all_games)}")
+            print(f"  ✅ Total unique games so far: {len(all_games)}")
+            
+            # Check for next page token
+            page_token = data.get('nextSortsPageToken')
+            if not page_token:
+                print(f"  ℹ️  No more pages available")
+                break
+            
+            # Rate limiting between pages
+            if page_count < max_pages_per_category:
+                time.sleep(self.rate_limit_delay)
         
-        print(f"\n🎉 SCRAPING COMPLETE!")
-        print(f"  📊 Total categories processed: {len(sort_ids)}")
+        print(f"\n🎉 CATEGORY SCRAPING COMPLETE!")
+        print(f"  📄 Pages fetched: {page_count}")
         print(f"  🎮 Total unique games collected: {len(all_games)}")
+        print("=" * 60)
+        
+        # Now enrich games with additional details (descriptions, thumbnails)
+        if all_games:
+            print(f"\n🔍 PHASE 2: Fetching additional details for {len(all_games)} games...")
+            print("=" * 60)
+            self._enrich_games_with_details(all_games)
         
         return all_games
+    
+    def _enrich_games_with_details(self, games: List[Dict]) -> None:
+        """
+        Enrich games with additional details (descriptions, thumbnails) from Roblox API.
+        Modifies the games list in-place.
+        
+        Args:
+            games: List of games to enrich
+        """
+        if not ROBLOX_API_AVAILABLE:
+            print("  ℹ️  Roblox API not available, skipping detail fetching")
+            return
+        
+        total = len(games)
+        for i, game in enumerate(games, 1):
+            universe_id = game.get('universeId')
+            place_id = game.get('rootPlaceId')
+            game_name = game.get('name', 'Unknown')
+            
+            if not universe_id:
+                print(f"  [{i}/{total}] ⚠️  {game_name}: No universe_id, skipping")
+                continue
+            
+            try:
+                print(f"  [{i}/{total}] 📝 Fetching details: {game_name}")
+                
+                # Fetch detailed game info
+                game_details = fetch_game_details_v2(universe_id)
+                if game_details:
+                    description = game_details.get('description', '').replace('\r\n', '\n').replace('\r', '\n').strip()
+                    if description:
+                        game['_enriched_description'] = description
+                
+                # Fetch thumbnail
+                thumbnail_data = fetch_game_thumbnail(universe_id, place_id)
+                if thumbnail_data and 'data' in thumbnail_data and thumbnail_data['data']:
+                    for item in thumbnail_data['data']:
+                        if item.get('state') == 'Completed' and item.get('imageUrl'):
+                            game['_enriched_thumbnail'] = item['imageUrl']
+                            break
+                
+                # Progress updates every 10 games
+                if i % 10 == 0:
+                    print(f"    Progress: {i}/{total} games enriched ({(i/total)*100:.1f}%)")
+                
+                # Rate limiting
+                time.sleep(1.5)
+                
+            except Exception as e:
+                print(f"  [{i}/{total}] ❌ {game_name}: {e}")
+        
+        print(f"\n  ✅ Detail fetching complete!")
+        print("=" * 60)
     
     def fetch_games_page(self, page_token: str = None) -> Optional[Dict]:
         """Fetch a single page of games from the charts API."""
@@ -630,37 +731,9 @@ class RobloxChartsScraper:
         total_up_votes = game_data.get('totalUpVotes', 0)
         total_down_votes = game_data.get('totalDownVotes', 0)
         
-        # Fetch real game description and thumbnail if API is available
-        real_description = None
-        thumbnail_url = None
-        
-        if ROBLOX_API_AVAILABLE and universe_id:
-            try:
-                print(f"    📝 Fetching details for: {game_name}")
-                
-                # Fetch detailed game info
-                game_details = fetch_game_details_v2(universe_id)
-                if game_details:  # fetch_game_details_v2 returns data directly
-                    # Preserve original newlines; normalize CRLF
-                    real_description = game_details.get('description', '').replace('\r\n', '\n').replace('\r', '\n').strip()
-                else:
-                    print(f"    ❌ API call returned no data")
-                
-                # Fetch thumbnail
-                thumbnail_data = fetch_game_thumbnail(universe_id, place_id)
-                if thumbnail_data and 'data' in thumbnail_data and thumbnail_data['data']:
-                    for item in thumbnail_data['data']:
-                        if item.get('state') == 'Completed' and item.get('imageUrl'):
-                            thumbnail_url = item['imageUrl']
-                            break
-                
-                # Small delay to be respectful to Roblox API
-                time.sleep(1.5)  # Increased delay to prevent rate limiting
-                
-            except Exception as e:
-                print(f"    ❌ Failed to fetch details for {game_name}: {e}")
-        elif not universe_id:
-            print(f"    ⚠️  No universe_id found, cannot fetch real description")
+        # Use enriched data if available (from _enrich_games_with_details)
+        real_description = game_data.get('_enriched_description')
+        thumbnail_url = game_data.get('_enriched_thumbnail')
         
         # Use real description if available, otherwise fall back to generic
         if real_description:
@@ -672,12 +745,8 @@ class RobloxChartsScraper:
         # Format description to lightweight Markdown with double newlines
         description = format_description_to_markdown(description)
         
-        # Use real thumbnail if available, otherwise show error
-        if thumbnail_url:
-            img_url = thumbnail_url
-        else:
-            print(f"    ❌ No thumbnail URL available for game {game_data.get('name', 'Unknown')} (ID: {universe_id})")
-            img_url = None
+        # Use real thumbnail if available
+        img_url = thumbnail_url if thumbnail_url else None
         
         # Determine categories based on sort and player count
         categories = []
