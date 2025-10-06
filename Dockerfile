@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM public.ecr.aws/lambda/python:3.11
 
 # Build arguments for timestamp
 ARG BUILD_TIMESTAMP
@@ -9,7 +9,7 @@ LABEL build.timestamp="${BUILD_TIMESTAMP}"
 LABEL build.version="${BUILD_VERSION}"
 LABEL build.component="roblox-downloader"
 
-WORKDIR /app
+WORKDIR ${LAMBDA_TASK_ROOT}
 
 # Install system dependencies required for Playwright/Chromium
 RUN apt-get update && apt-get install -y \
@@ -37,25 +37,24 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
-COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --upgrade pip && \
-    pip install -r requirements.txt
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers
 RUN playwright install chromium && \
     playwright install-deps chromium
 
 # Copy application files
-COPY download_roblox.py /app/download_roblox.py
-COPY lambda_handler.py /app/lambda_handler.py
+COPY download_roblox.py ${LAMBDA_TASK_ROOT}/download_roblox.py
+COPY lambda_handler.py ${LAMBDA_TASK_ROOT}/lambda_handler.py
 
 # Create output directory
 RUN mkdir -p /downloads
 
 # Create a build info file for runtime access
-RUN echo "Build Timestamp: ${BUILD_TIMESTAMP}" > /app/build_info.txt && \
-    echo "Build Version: ${BUILD_VERSION}" >> /app/build_info.txt && \
-    echo "Component: roblox-downloader" >> /app/build_info.txt
+RUN echo "Build Timestamp: ${BUILD_TIMESTAMP}" > ${LAMBDA_TASK_ROOT}/build_info.txt && \
+    echo "Build Version: ${BUILD_VERSION}" >> ${LAMBDA_TASK_ROOT}/build_info.txt && \
+    echo "Component: roblox-downloader" >> ${LAMBDA_TASK_ROOT}/build_info.txt
 
 # Set default output directory
 ENV OUTPUT_DIR=/downloads
@@ -63,8 +62,6 @@ ENV OUTPUT_DIR=/downloads
 # Set headless mode for Docker (no display available)
 ENV HEADLESS=true
 
-# For Lambda, use the handler; for direct Docker runs, use download_roblox.py
-# Lambda will override this with its own runtime
-ENTRYPOINT []
-CMD ["python", "-m", "awslambdaric", "lambda_handler.handler"]
+# Set Lambda handler
+CMD ["lambda_handler.handler"]
 
