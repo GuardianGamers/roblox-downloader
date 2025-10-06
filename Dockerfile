@@ -61,11 +61,10 @@ RUN echo "Build Timestamp: ${BUILD_TIMESTAMP}" > /app/build_info.txt && \
 # Set default output directory
 ENV OUTPUT_DIR=/downloads
 
-# Set headless mode to false (use Xvfb for virtual display)
-ENV HEADLESS=false
-ENV DISPLAY=:99
+# Set headless mode (back to true for now)
+ENV HEADLESS=true
 ENV PYTHONUNBUFFERED=1
 
-# Run the ECS task script with Xvfb (virtual framebuffer for non-headless browser)
-CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1920x1080x24", "python", "/app/ecs_task.py"]
+# Run the ECS task script directly
+CMD ["python", "/app/ecs_task.py"]
 

@@ -192,7 +192,7 @@ Resources:
             - Name: S3_PREFIX
               Value: "apk/"
             - Name: HEADLESS
-              Value: "false"
+              Value: "true"
             - Name: ACTION
               Value: "download"
             - Name: EXTRACT
