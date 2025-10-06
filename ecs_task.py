@@ -81,11 +81,6 @@ def main():
             'body': json.dumps({'error': 'BUCKET_NAME not configured'})
         }
     
-    # Parse event
-    action = event.get('action', 'download')
-    extract = event.get('extract', True)
-    force = event.get('force', False)
-    
     # Create temporary directory for downloads
     with tempfile.TemporaryDirectory() as temp_dir:
         print(f"Using temporary directory: {temp_dir}")
