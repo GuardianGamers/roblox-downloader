@@ -179,8 +179,8 @@ def handler(event, context):
         new_version = version_match.group(1) if version_match else "unknown"
         print(f"Detected version: {new_version}")
         
-        # Upload XAPK file to S3
-        s3_key = f"{s3_prefix}{filename}"
+        # Upload XAPK file to S3 organized by version: /apk/{version}/filename.xapk
+        s3_key = f"{s3_prefix}{new_version}/{filename}"
         if not upload_to_s3(xapk_file, bucket_name, s3_key):
             return {
                 'statusCode': 500,
@@ -189,7 +189,7 @@ def handler(event, context):
         
         uploaded_files = [s3_key]
         
-        # If extracted, upload the extracted files as well
+        # If extracted, upload the extracted files to /apk/{version}/extracted/
         if extract:
             extracted_dir = os.path.join(temp_dir, f"roblox_{new_version}_extracted")
             if os.path.exists(extracted_dir):
@@ -199,7 +199,8 @@ def handler(event, context):
                     for file in files:
                         local_file = os.path.join(root, file)
                         relative_path = os.path.relpath(local_file, extracted_dir)
-                        s3_extracted_key = f"{s3_prefix}extracted/{new_version}/{relative_path}"
+                        # Upload to /apk/{version}/extracted/...
+                        s3_extracted_key = f"{s3_prefix}{new_version}/extracted/{relative_path}"
                         
                         if upload_to_s3(local_file, bucket_name, s3_extracted_key):
                             uploaded_files.append(s3_extracted_key)

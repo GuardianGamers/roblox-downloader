@@ -119,13 +119,14 @@ make sam-deploy STAGE=prod
 ```
 
 ### What gets deployed:
-- **S3 Bucket**: `roblox-{AccountId}-{Stage}` with `/apk` directory
+- **S3 Bucket**: `roblox-{AccountId}-{Stage}` with version-organized `/apk/{version}/` directories
 - **Lambda Function**: Docker-based function with 15 minute timeout
 - **EventBridge Rule**: Daily schedule (default: 12:00 UTC)
 - **CloudWatch Logs**: 30-day retention
 - **CloudWatch Alarm**: Alert on Lambda errors
 - **IAM Roles**: Least-privilege access to S3, SSM, and CloudWatch
 - **SSM Parameters**: Store bucket info and current version
+- **Version History**: Each Roblox version stored in its own directory for complete history
 
 ### Manage deployment:
 ```bash
@@ -137,11 +138,34 @@ make sam-delete STAGE=dev      # Delete stack
 
 ### Check downloaded files:
 ```bash
-# List files in S3
-aws s3 ls s3://roblox-{AccountId}-dev/apk/ --recursive
+# List all versions
+aws s3 ls s3://roblox-{AccountId}-dev/apk/
 
-# Download latest APK
-aws s3 cp s3://roblox-{AccountId}-dev/apk/Roblox_latest_apkcombo.com.xapk ./
+# List files for a specific version
+aws s3 ls s3://roblox-{AccountId}-dev/apk/2.692.843/ --recursive
+
+# Download specific version
+aws s3 cp s3://roblox-{AccountId}-dev/apk/2.692.843/Roblox_2.692.843_apkcombo.com.xapk ./
+
+# Download extracted APKs for a version
+aws s3 sync s3://roblox-{AccountId}-dev/apk/2.692.843/extracted/ ./roblox-apks/
+```
+
+### S3 Structure:
+```
+s3://roblox-{AccountId}-{Stage}/
+└── apk/
+    ├── 2.692.843/
+    │   ├── Roblox_2.692.843_apkcombo.com.xapk
+    │   └── extracted/
+    │       ├── base.apk
+    │       ├── split_config.x86_64.apk
+    │       └── manifest.json
+    ├── 2.693.100/
+    │   ├── Roblox_2.693.100_apkcombo.com.xapk
+    │   └── extracted/
+    │       └── ...
+    └── (each version in its own directory)
 ```
 
 ## Notes

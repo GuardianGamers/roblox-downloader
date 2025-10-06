@@ -229,7 +229,7 @@ Resources:
       Name: !Sub "/guardiangamer/${Stage}/roblox/bucket-url"
       Type: String
       Value: !Sub "s3://${RobloxBucket}/apk"
-      Description: !Sub "S3 bucket URL for Roblox APKs in ${Stage} environment"
+      Description: !Sub "S3 bucket URL for Roblox APKs (organized by version: /apk/{version}/) in ${Stage} environment"
       Tags:
         Stage: !Ref Stage
         Project: roblox-downloader
