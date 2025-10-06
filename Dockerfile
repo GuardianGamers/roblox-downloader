@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
+    xauth \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
