@@ -13,8 +13,10 @@ from typing import Optional
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 def log(message):
-    """Log a message to stdout."""
-    print(message)
+    """Log a message to stdout with timestamp."""
+    from datetime import datetime
+    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    print(f"[{timestamp} UTC] {message}")
 
 def get_current_version(url: str) -> Optional[str]:
     """
@@ -189,22 +191,28 @@ def download_with_playwright(url: str, download_dir: str) -> Optional[str]:
         try:
             # Navigate to the page
             log("Loading the page...")
+            page_start = time.time()
             page.goto(url, wait_until='networkidle', timeout=60000)
+            log(f"Page loaded in {time.time() - page_start:.2f}s")
             
-            log("Waiting for download link to appear (this may take a few seconds)...")
+            log("Waiting for download link to appear (max 60 seconds)...")
             
             # Wait for the download link to appear - check multiple possible selectors
             download_link = None
-            max_wait_time = 30  # seconds
+            max_wait_time = 60  # seconds (increased from 30)
             start_time = time.time()
             
             while time.time() - start_time < max_wait_time:
+                elapsed = time.time() - start_time
+                if elapsed > 0 and int(elapsed) % 10 == 0 and elapsed - int(elapsed) < 0.5:
+                    log(f"Still waiting... ({elapsed:.1f}s elapsed)")
+                
                 # Try to find any link that starts with https://apkcombo.com/d?u=
                 links = page.query_selector_all('a[href^="https://apkcombo.com/d?u="]')
                 
                 if links:
                     download_link = links[0].get_attribute('href')
-                    log(f"Found download link: {download_link}")
+                    log(f"Found download link after {elapsed:.2f}s: {download_link}")
                     break
                 
                 # Also try button elements with onclick handlers or download attributes
@@ -222,10 +230,18 @@ def download_with_playwright(url: str, download_dir: str) -> Optional[str]:
                 time.sleep(0.5)
             
             if not download_link:
-                log("Error: Download link not found after waiting")
+                elapsed = time.time() - start_time
+                log(f"Error: Download link not found after {elapsed:.2f}s")
                 log("Taking screenshot for debugging...")
-                page.screenshot(path=os.path.join(download_dir, 'debug_screenshot.png'))
-                log(f"Screenshot saved to: {os.path.join(download_dir, 'debug_screenshot.png')}")
+                screenshot_path = os.path.join(download_dir, 'debug_screenshot.png')
+                page.screenshot(path=screenshot_path)
+                log(f"Screenshot saved to: {screenshot_path}")
+                
+                # Also save page HTML for debugging
+                html_path = os.path.join(download_dir, 'debug_page.html')
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                log(f"Page HTML saved to: {html_path}")
                 return None
             
             log("Starting download with browser (required for Cloudflare)...")
