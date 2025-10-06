@@ -603,8 +603,8 @@ class RobloxChartsScraper:
                 if i % 10 == 0:
                     print(f"    Progress: {i}/{total} games enriched ({(i/total)*100:.1f}%)")
                 
-                # Rate limiting
-                time.sleep(1.5)
+                # Rate limiting (reduced to be faster while still respectful)
+                time.sleep(0.5)
                 
             except Exception as e:
                 print(f"  [{i}/{total}] ❌ {game_name}: {e}")
