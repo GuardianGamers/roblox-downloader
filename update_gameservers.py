@@ -34,12 +34,13 @@ def log(message: str):
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     print(f"[{timestamp} UTC] {message}")
 
-def fetch_latest_roblox_games(pages_per_category: int = 5) -> List[Dict]:
+def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None) -> List[Dict]:
     """
     Fetch latest games from Roblox charts using existing scraper.
     
     Args:
         pages_per_category: Number of pages to fetch per category
+        max_games: Maximum number of games to process (for testing)
         
     Returns:
         List of game data dictionaries
@@ -47,27 +48,52 @@ def fetch_latest_roblox_games(pages_per_category: int = 5) -> List[Dict]:
     log("Fetching latest Roblox games from charts...")
     
     try:
-        result = subprocess.run(
-            ['python3', ROBLOX_CHARTS_SCRAPER, 
-             '--pages', str(pages_per_category),
-             '--output', '/tmp/roblox_charts.json'],
-            capture_output=True,
-            text=True,
-            timeout=300
+        # Import the scraper as a module
+        sys.path.insert(0, os.path.dirname(ROBLOX_CHARTS_SCRAPER))
+        import roblox_charts_scraper
+        
+        # Create scraper instance
+        scraper = roblox_charts_scraper.RobloxChartsScraper()
+        
+        # Fetch games from all categories
+        log(f"Fetching {pages_per_category} pages per category...")
+        all_games = scraper.fetch_all_categories(
+            pages_per_category=pages_per_category,
+            specific_categories=None  # Fetch all categories
         )
         
-        if result.returncode != 0:
-            log(f"Error running charts scraper: {result.stderr}")
+        if not all_games:
+            log("No games fetched from Roblox charts")
             return []
         
-        with open('/tmp/roblox_charts.json', 'r') as f:
-            games = json.load(f)
+        log(f"Fetched {len(all_games)} raw games from Roblox API")
         
-        log(f"Fetched {len(games)} games from Roblox charts")
-        return games
+        # Convert to gameserver format (in memory, not writing to file)
+        log(f"Converting to gameserver format...")
+        games_list = []
+        
+        for i, game in enumerate(all_games):
+            # Convert each game using the scraper's method
+            converted = scraper.convert_to_gameserver_format(game)
+            if converted:
+                games_list.append(converted)
+            
+            # Progress update every 25 games
+            if (i + 1) % 25 == 0:
+                log(f"  Processed {i + 1}/{len(all_games)} games...")
+        
+        # Limit for testing if specified
+        if max_games and len(games_list) > max_games:
+            log(f"Limiting to first {max_games} games for testing")
+            games_list = games_list[:max_games]
+        
+        log(f"Successfully converted {len(games_list)} games")
+        return games_list
         
     except Exception as e:
         log(f"Error fetching games: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def sanitize_description_with_ai(description: str, game_name: str) -> Dict:
@@ -246,7 +272,8 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/") -> Dic
     log(f"Loaded {len(existing_exclusions)} existing exclusions")
     
     # Fetch latest games from Roblox
-    raw_games = fetch_latest_roblox_games(pages_per_category=5)
+    # Limit to 20 games for initial testing to reduce AI costs
+    raw_games = fetch_latest_roblox_games(pages_per_category=5, max_games=None)
     
     if not raw_games:
         return {
