@@ -26,7 +26,11 @@ s3_client = boto3.client('s3')
 bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
 
 # Configuration
-GAME_ASSETS_REPO = "../game-assets"
+# NOTE: For production, you'll need to either:
+# 1. Copy roblox_charts_scraper.py into this repo, or
+# 2. Use git submodule for game-assets, or
+# 3. Call Roblox API directly in this module
+GAME_ASSETS_REPO = os.environ.get('GAME_ASSETS_PATH', '../game-assets')
 ROBLOX_CHARTS_SCRAPER = f"{GAME_ASSETS_REPO}/roblox_charts_scraper.py"
 BLACKLIST_FILE = f"{GAME_ASSETS_REPO}/blacklist.json"
 
