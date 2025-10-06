@@ -47,6 +47,7 @@ RUN playwright install chromium && \
 
 # Copy application files
 COPY download_roblox.py /app/download_roblox.py
+COPY lambda_handler.py /app/lambda_handler.py
 
 # Create output directory
 RUN mkdir -p /downloads
@@ -62,6 +63,8 @@ ENV OUTPUT_DIR=/downloads
 # Set headless mode for Docker (no display available)
 ENV HEADLESS=true
 
-# Default command - can be overridden
-CMD ["python", "download_roblox.py", "--output-dir", "/downloads", "--extract"]
+# For Lambda, use the handler; for direct Docker runs, use download_roblox.py
+# Lambda will override this with its own runtime
+ENTRYPOINT []
+CMD ["python", "-m", "awslambdaric", "lambda_handler.handler"]
 

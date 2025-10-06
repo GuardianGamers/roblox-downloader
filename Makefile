@@ -12,22 +12,38 @@ ECR_IMAGE=$(ECR_REGISTRY)/$(LOCAL_IMAGE)
 
 VERSION?=latest
 
+# SAM/CloudFormation stack name
+STACK_NAME=roblox-downloader-$(STAGE)
+
 # Default target
 .PHONY: help
 help:
 	@echo "Available commands:"
+	@echo ""
+	@echo "Docker commands:"
 	@echo "  make build [STAGE=dev|test|prod]       - Build the Docker image"
 	@echo "  make run [STAGE=dev|test|prod]         - Run the Docker container locally"
 	@echo "  make run-check [STAGE=dev|test|prod]   - Run version check only"
 	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy the Docker image to ECR"
 	@echo "  make build-info [STAGE=dev|test|prod]  - Show build information for Docker image"
 	@echo "  make clean                              - Remove local Docker images"
+	@echo ""
+	@echo "AWS SAM commands:"
+	@echo "  make sam-validate                       - Validate SAM template"
+	@echo "  make sam-build [STAGE=dev|test|prod]   - Build SAM application"
+	@echo "  make sam-deploy [STAGE=dev|test|prod]  - Deploy stack to AWS"
+	@echo "  make sam-delete [STAGE=dev|test|prod]  - Delete stack from AWS"
+	@echo "  make sam-logs [STAGE=dev|test|prod]    - Tail Lambda logs"
+	@echo "  make sam-invoke [STAGE=dev|test|prod]  - Manually invoke Lambda"
+	@echo "  make sam-status [STAGE=dev|test|prod]  - Show stack status"
+	@echo ""
 	@echo "  make help                               - Show this help message"
 	@echo ""
 	@echo "Current settings:"
 	@echo "  STAGE: $(STAGE) (default: dev, options: dev, test, prod)"
 	@echo "  VERSION: $(VERSION) (default: latest)"
 	@echo "  LOCAL_IMAGE: $(LOCAL_IMAGE):$(VERSION)"
+	@echo "  STACK_NAME: $(STACK_NAME)"
 
 # Build target
 .PHONY: build
@@ -107,4 +123,72 @@ clean:
 	@echo "Removing local Docker images..."
 	@docker rmi $(LOCAL_IMAGE):$(VERSION) 2>/dev/null || echo "Image $(LOCAL_IMAGE):$(VERSION) not found"
 	@echo "Cleanup complete"
+
+# SAM targets
+.PHONY: sam-validate
+sam-validate:
+	@echo "Validating SAM template..."
+	sam validate --template template.yaml
+
+.PHONY: sam-build
+sam-build: build deploy
+	@echo "Building SAM application..."
+	sam build --template template.yaml
+
+.PHONY: sam-deploy
+sam-deploy: sam-build
+	@echo "Deploying SAM application to AWS (STAGE=$(STAGE))..."
+	sam deploy \
+		--template template.yaml \
+		--stack-name $(STACK_NAME) \
+		--parameter-overrides Stage=$(STAGE) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--resolve-s3 \
+		--no-fail-on-empty-changeset \
+		--tags Stage=$(STAGE) Project=roblox-downloader
+
+.PHONY: sam-delete
+sam-delete:
+	@echo "Deleting SAM stack $(STACK_NAME)..."
+	@read -p "Are you sure you want to delete stack $(STACK_NAME)? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		aws cloudformation delete-stack --stack-name $(STACK_NAME); \
+		echo "Waiting for stack deletion..."; \
+		aws cloudformation wait stack-delete-complete --stack-name $(STACK_NAME); \
+		echo "Stack deleted successfully"; \
+	else \
+		echo "Deletion cancelled"; \
+	fi
+
+.PHONY: sam-logs
+sam-logs:
+	@echo "Tailing Lambda logs for $(STACK_NAME)..."
+	sam logs --stack-name $(STACK_NAME) --tail
+
+.PHONY: sam-invoke
+sam-invoke:
+	@echo "Invoking Lambda function..."
+	aws lambda invoke \
+		--function-name roblox-downloader-$(STAGE) \
+		--payload '{"action":"download","extract":true,"force":false}' \
+		--cli-binary-format raw-in-base64-out \
+		response.json
+	@echo "Response:"
+	@cat response.json
+	@rm response.json
+
+.PHONY: sam-status
+sam-status:
+	@echo "Stack status for $(STACK_NAME):"
+	@aws cloudformation describe-stacks \
+		--stack-name $(STACK_NAME) \
+		--query 'Stacks[0].[StackStatus,LastUpdatedTime]' \
+		--output table 2>/dev/null || echo "Stack not found"
+	@echo ""
+	@echo "Stack outputs:"
+	@aws cloudformation describe-stacks \
+		--stack-name $(STACK_NAME) \
+		--query 'Stacks[0].Outputs' \
+		--output table 2>/dev/null || echo "No outputs available"
 

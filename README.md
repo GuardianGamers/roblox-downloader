@@ -97,9 +97,58 @@ APKCombo protects their download links with **Cloudflare** which requires JavaSc
 - **Error Handling**: Takes screenshots on errors for debugging
 - **APK Processing**: Compatible with the parsing logic from `../game-assets/install-apkcombo.py`
 
+## AWS Deployment (Automated Daily Downloads)
+
+Deploy to AWS Lambda with scheduled daily downloads to S3:
+
+### Prerequisites:
+- AWS CLI configured
+- AWS SAM CLI installed
+- Docker running
+
+### Deploy:
+```bash
+# Validate template
+make sam-validate
+
+# Deploy to dev environment
+make sam-deploy STAGE=dev
+
+# Deploy to production
+make sam-deploy STAGE=prod
+```
+
+### What gets deployed:
+- **S3 Bucket**: `roblox-{AccountId}-{Stage}` with `/apk` directory
+- **Lambda Function**: Docker-based function with 15 minute timeout
+- **EventBridge Rule**: Daily schedule (default: 12:00 UTC)
+- **CloudWatch Logs**: 30-day retention
+- **CloudWatch Alarm**: Alert on Lambda errors
+- **IAM Roles**: Least-privilege access to S3, SSM, and CloudWatch
+- **SSM Parameters**: Store bucket info and current version
+
+### Manage deployment:
+```bash
+make sam-status STAGE=dev      # Check stack status
+make sam-logs STAGE=dev        # Tail Lambda logs
+make sam-invoke STAGE=dev      # Manually trigger download
+make sam-delete STAGE=dev      # Delete stack
+```
+
+### Check downloaded files:
+```bash
+# List files in S3
+aws s3 ls s3://roblox-{AccountId}-dev/apk/ --recursive
+
+# Download latest APK
+aws s3 cp s3://roblox-{AccountId}-dev/apk/Roblox_latest_apkcombo.com.xapk ./
+```
+
 ## Notes
 
-- The browser will open in visible mode (not headless) to better avoid detection
+- The browser will open in visible mode (not headless) for local runs
+- Lambda runs in headless mode automatically
 - If the download link doesn't appear, a screenshot will be saved for debugging
 - The script requires x86_64 architecture support in the downloaded APK
+- Lambda function has 15-minute timeout and 2GB memory
 

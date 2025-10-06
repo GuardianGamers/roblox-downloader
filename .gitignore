@@ -43,3 +43,8 @@ downloads/
 .DS_Store
 Thumbs.db
 
+# SAM
+.aws-sam/
+samconfig.toml.bak
+response.json
+

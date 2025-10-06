@@ -1,0 +1,331 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Roblox Downloader - Daily APK Download to S3
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    Description: Deployment stage (dev, test, prod)
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  
+  BucketName:
+    Type: String
+    Default: roblox
+    Description: Base name for the S3 bucket
+  
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 12 * * ? *)"
+    Description: Schedule for Lambda execution (default: daily at 12:00 UTC)
+
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 2048
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        BUCKET_NAME: !Ref RobloxBucket
+        HEADLESS: "true"
+
+Resources:
+  # S3 Bucket for Roblox APKs
+  RobloxBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${BucketName}-${AWS::AccountId}-${Stage}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: TransitionOldVersionsToIA
+            Status: Enabled
+            Prefix: apk/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+      Tags:
+        - Key: Name
+          Value: !Sub "${BucketName}-${Stage}"
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # CloudWatch Log Group for Lambda
+  RobloxDownloaderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/roblox-downloader-${Stage}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: Project
+          Value: roblox-downloader
+
+  # IAM Role for Lambda
+  RobloxDownloaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "RobloxDownloaderRole-${Stage}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:HeadObject
+                Resource:
+                  - !GetAtt RobloxBucket.Arn
+                  - !Sub "${RobloxBucket.Arn}/*"
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:PutParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/guardiangamer/${Stage}/roblox/*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt RobloxDownloaderLogGroup.Arn
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/roblox-downloader-${Stage}"
+      Tags:
+        - Key: Name
+          Value: !Sub "RobloxDownloaderRole-${Stage}"
+        - Key: Environment
+          Value: !Ref Stage
+
+  # Lambda Function using Docker image
+  RobloxDownloaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "roblox-downloader-${Stage}"
+      PackageType: Image
+      ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/roblox-downloader-${Stage}:latest"
+      Role: !GetAtt RobloxDownloaderRole.Arn
+      Timeout: 900
+      MemorySize: 2048
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          BUCKET_NAME: !Ref RobloxBucket
+          S3_PREFIX: "apk/"
+          HEADLESS: "true"
+      Tags:
+        Environment: !Ref Stage
+        Project: roblox-downloader
+    Metadata:
+      DockerTag: latest
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+  # EventBridge Rule for daily execution
+  RobloxDownloaderSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "roblox-downloader-schedule-${Stage}"
+      Description: Daily schedule to download latest Roblox APK
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt RobloxDownloaderFunction.Arn
+          Id: RobloxDownloaderTarget
+          Input: |
+            {
+              "action": "download",
+              "extract": true,
+              "force": false
+            }
+
+  # Permission for EventBridge to invoke Lambda
+  RobloxDownloaderSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RobloxDownloaderFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RobloxDownloaderSchedule.Arn
+
+  # SSM Parameters for bucket information
+  RobloxBucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/guardiangamer/${Stage}/roblox/bucket-name"
+      Type: String
+      Value: !Ref RobloxBucket
+      Description: !Sub "S3 bucket name for Roblox APKs in ${Stage} environment"
+      Tags:
+        Stage: !Ref Stage
+        Project: roblox-downloader
+
+  RobloxBucketArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/guardiangamer/${Stage}/roblox/bucket-arn"
+      Type: String
+      Value: !GetAtt RobloxBucket.Arn
+      Description: !Sub "S3 bucket ARN for Roblox APKs in ${Stage} environment"
+      Tags:
+        Stage: !Ref Stage
+        Project: roblox-downloader
+
+  RobloxBucketUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/guardiangamer/${Stage}/roblox/bucket-url"
+      Type: String
+      Value: !Sub "s3://${RobloxBucket}/apk"
+      Description: !Sub "S3 bucket URL for Roblox APKs in ${Stage} environment"
+      Tags:
+        Stage: !Ref Stage
+        Project: roblox-downloader
+
+  RobloxBucketRegionParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/guardiangamer/${Stage}/roblox/bucket-region"
+      Type: String
+      Value: !Ref AWS::Region
+      Description: !Sub "AWS region for Roblox S3 bucket in ${Stage} environment"
+      Tags:
+        Stage: !Ref Stage
+        Project: roblox-downloader
+
+  # SSM Parameter to track current version
+  RobloxCurrentVersionParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/guardiangamer/${Stage}/roblox/current-version"
+      Type: String
+      Value: "0.0.0"
+      Description: !Sub "Current downloaded Roblox version in ${Stage} environment"
+      Tags:
+        Stage: !Ref Stage
+        Project: roblox-downloader
+
+  # CloudWatch Alarm for Lambda failures
+  RobloxDownloaderErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "roblox-downloader-errors-${Stage}"
+      AlarmDescription: Alert when Roblox downloader Lambda encounters errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RobloxDownloaderFunction
+      TreatMissingData: notBreaching
+
+Outputs:
+  BucketName:
+    Description: Name of the S3 bucket for Roblox APKs
+    Value: !Ref RobloxBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketName"
+  
+  BucketArn:
+    Description: ARN of the S3 bucket
+    Value: !GetAtt RobloxBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketArn"
+  
+  BucketApkUrl:
+    Description: S3 URL for APK directory
+    Value: !Sub "s3://${RobloxBucket}/apk"
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketApkUrl"
+  
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref RobloxDownloaderFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionName"
+  
+  LambdaFunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt RobloxDownloaderFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+  
+  RoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt RobloxDownloaderRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RoleArn"
+  
+  LogGroupName:
+    Description: Name of the CloudWatch Log Group
+    Value: !Ref RobloxDownloaderLogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-LogGroupName"
+  
+  ScheduleName:
+    Description: Name of the EventBridge schedule
+    Value: !Ref RobloxDownloaderSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-ScheduleName"
+  
+  SSMParameterPath:
+    Description: Base SSM parameter path for Roblox downloader
+    Value: !Sub "/guardiangamer/${Stage}/roblox"
+    Export:
+      Name: !Sub "${AWS::StackName}-SSMParameterPath"
