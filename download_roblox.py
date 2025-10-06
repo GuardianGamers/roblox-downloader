@@ -145,6 +145,7 @@ def download_with_playwright(url: str, download_dir: str) -> Optional[str]:
     
     # Check if we should run headless (e.g., in Docker)
     headless = os.environ.get('HEADLESS', 'false').lower() == 'true'
+    log(f"Running in {'HEADLESS' if headless else 'VISIBLE'} mode (HEADLESS env var: {os.environ.get('HEADLESS', 'not set')})")
     
     with sync_playwright() as p:
         # Launch browser (headless in Docker, visible otherwise)
