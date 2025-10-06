@@ -430,7 +430,7 @@ Examples:
     )
     parser.add_argument(
         "--url",
-        default="https://apkcombo.com/downloader/#package=com.roblox.client&device=tablet&arches=x86_64",
+        default="https://apkcombo.com/downloader/#package=com.roblox.client&arches=x86_64",
         help="APKCombo URL to download from"
     )
     parser.add_argument(
