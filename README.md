@@ -2,29 +2,43 @@
 
 This project uses Playwright with stealth mode to automatically download Roblox APK files from APKCombo.
 
-## Quick Start with Docker (Recommended)
+## Quick Start
 
-### Build and run:
+### AWS Deployment (Recommended):
 ```bash
-make run
+# Deploy full stack to AWS
+make deploy STAGE=dev
 ```
 
-This will build the Docker image and download the latest Roblox APK to `./downloads/`
+This deploys the complete infrastructure: Lambda, S3, EventBridge schedule, CloudWatch, etc.
 
-### Check version only:
+### Local Docker Testing:
 ```bash
-make run-check
+# Build and run locally
+make local-run
+
+# Check version only
+make local-check
 ```
 
-### Other Docker commands:
+### All Commands:
 ```bash
-make build              # Build the Docker image
-make run                # Download and extract Roblox APK
-make run-check          # Check version without downloading
-make run-custom ARGS="--force --extract"  # Run with custom arguments
-make deploy STAGE=prod  # Deploy to AWS ECR
-make build-info         # Show build information
-make clean              # Remove local Docker images
+# AWS SAM deployment
+make validate           # Validate SAM template
+make build              # Build SAM application
+make deploy             # Deploy to AWS
+make logs               # View Lambda logs
+make invoke             # Manually trigger download
+make status             # Show stack status
+make delete             # Delete stack
+
+# Local Docker testing
+make local-build        # Build Docker image locally
+make local-run          # Run container locally
+make local-check        # Check version without downloading
+make local-info         # Show build information
+make local-clean        # Remove local Docker images
+
 make help               # Show all available commands
 ```
 
@@ -109,13 +123,13 @@ Deploy to AWS Lambda with scheduled daily downloads to S3:
 ### Deploy:
 ```bash
 # Validate template
-make sam-validate
+make validate
 
 # Deploy to dev environment
-make sam-deploy STAGE=dev
+make deploy STAGE=dev
 
 # Deploy to production
-make sam-deploy STAGE=prod
+make deploy STAGE=prod
 ```
 
 ### What gets deployed:
@@ -130,10 +144,10 @@ make sam-deploy STAGE=prod
 
 ### Manage deployment:
 ```bash
-make sam-status STAGE=dev      # Check stack status
-make sam-logs STAGE=dev        # Tail Lambda logs
-make sam-invoke STAGE=dev      # Manually trigger download
-make sam-delete STAGE=dev      # Delete stack
+make status STAGE=dev      # Check stack status
+make logs STAGE=dev        # Tail Lambda logs
+make invoke STAGE=dev      # Manually trigger download
+make delete STAGE=dev      # Delete stack
 ```
 
 ### Check downloaded files:

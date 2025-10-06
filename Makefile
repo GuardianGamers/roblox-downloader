@@ -20,23 +20,21 @@ STACK_NAME=roblox-downloader-$(STAGE)
 help:
 	@echo "Available commands:"
 	@echo ""
-	@echo "Local Docker commands (for testing):"
-	@echo "  make build [STAGE=dev|test|prod]       - Build Docker image locally"
-	@echo "  make run [STAGE=dev|test|prod]         - Run container locally"
-	@echo "  make run-check [STAGE=dev|test|prod]   - Run version check only"
-	@echo "  make build-info [STAGE=dev|test|prod]  - Show build information"
-	@echo "  make clean                              - Remove local Docker images"
+	@echo "AWS SAM deployment (recommended):"
+	@echo "  make validate                           - Validate SAM template"
+	@echo "  make build [STAGE=dev|test|prod]       - Build SAM application"
+	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy full stack to AWS"
+	@echo "  make delete [STAGE=dev|test|prod]      - Delete stack from AWS"
+	@echo "  make logs [STAGE=dev|test|prod]        - Tail Lambda logs"
+	@echo "  make invoke [STAGE=dev|test|prod]      - Manually invoke Lambda"
+	@echo "  make status [STAGE=dev|test|prod]      - Show stack status"
 	@echo ""
-	@echo "ECR commands (standalone, without SAM):"
-	@echo "  make deploy [STAGE=dev|test|prod]      - Push Docker image to ECR"
-	@echo ""
-	@echo "AWS SAM commands (full stack deployment):"
-	@echo "  make sam-validate                       - Validate SAM template"
-	@echo "  make sam-deploy [STAGE=dev|test|prod]  - Build & deploy full stack to AWS"
-	@echo "  make sam-delete [STAGE=dev|test|prod]  - Delete stack from AWS"
-	@echo "  make sam-logs [STAGE=dev|test|prod]    - Tail Lambda logs"
-	@echo "  make sam-invoke [STAGE=dev|test|prod]  - Manually invoke Lambda"
-	@echo "  make sam-status [STAGE=dev|test|prod]  - Show stack status"
+	@echo "Local Docker testing:"
+	@echo "  make local-build [STAGE=dev]            - Build Docker image locally"
+	@echo "  make local-run [STAGE=dev]              - Run container locally"
+	@echo "  make local-check [STAGE=dev]            - Run version check only"
+	@echo "  make local-info [STAGE=dev]             - Show local build information"
+	@echo "  make local-clean                        - Remove local Docker images"
 	@echo ""
 	@echo "  make help                               - Show this help message"
 	@echo ""
@@ -46,11 +44,11 @@ help:
 	@echo "  LOCAL_IMAGE: $(LOCAL_IMAGE):$(VERSION)"
 	@echo "  STACK_NAME: $(STACK_NAME)"
 
-# Build target
-.PHONY: build
-build:
+# Local build target
+.PHONY: local-build
+local-build:
 	@BUILD_TIMESTAMP=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
-	echo "Building roblox-downloader with timestamp: $$BUILD_TIMESTAMP"; \
+	echo "Building roblox-downloader locally with timestamp: $$BUILD_TIMESTAMP"; \
 	docker build \
 		--build-arg BUILD_TIMESTAMP="$$BUILD_TIMESTAMP" \
 		--build-arg BUILD_VERSION="$(VERSION)" \
@@ -58,51 +56,48 @@ build:
 		-f $(DOCKERFILE) .
 	@echo "Image built locally: $(LOCAL_IMAGE):$(VERSION)"
 
-# Run target - downloads and extracts to local directory
-.PHONY: run
-run: build
-	@echo "Running roblox-downloader..."
+# Local run target - downloads and extracts to local directory
+.PHONY: local-run
+local-run: local-build
+	@echo "Running roblox-downloader locally..."
 	@mkdir -p ./downloads
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION)
 
-# Run version check only
-.PHONY: run-check
-run-check: build
-	@echo "Checking Roblox version..."
+# Local version check only
+.PHONY: local-check
+local-check: local-build
+	@echo "Checking Roblox version locally..."
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads --check-only
 
-# Run with custom arguments
-.PHONY: run-custom
-run-custom: build
-	@echo "Running with custom arguments: $(ARGS)"
+# Local run with custom arguments
+.PHONY: local-custom
+local-custom: local-build
+	@echo "Running locally with custom arguments: $(ARGS)"
 	@mkdir -p ./downloads
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads $(ARGS)
 
-# Deploy target
-.PHONY: deploy
-deploy: build
-	@echo "Starting ECR login..."
+# Local ECR push target (standalone, without SAM)
+.PHONY: local-push-ecr
+local-push-ecr: local-build
+	@echo "Pushing local image to ECR..."
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	@echo "Checking/creating ECR repository..."
 	aws ecr describe-repositories --repository-names $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null 2>&1 || aws ecr create-repository --repository-name $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null
-	@echo "Tagging image: $(LOCAL_IMAGE):$(VERSION) as $(ECR_IMAGE):$(VERSION)"
 	docker tag $(LOCAL_IMAGE):$(VERSION) $(ECR_IMAGE):$(VERSION)
-	@echo "Pushing image to ECR..."
 	docker push $(ECR_IMAGE):$(VERSION)
 	@echo "Image deployed: $(ECR_IMAGE):$(VERSION)"
 
-# Build info target - shows build information for Docker image
-.PHONY: build-info
-build-info:
-	@echo "Build Information for Docker Image (STAGE=$(STAGE)):"
+# Local build info target
+.PHONY: local-info
+local-info:
+	@echo "Local Docker Image Information (STAGE=$(STAGE)):"
 	@echo "================================================="
 	@echo ""
 	@echo "🔍 Image: $(LOCAL_IMAGE):$(VERSION)"
@@ -113,32 +108,32 @@ build-info:
 		echo "  📊 Image Size: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.Size}}' | tail -n +2)"; \
 		echo "  🆔 Image ID: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.ID}}' | tail -n +2)"; \
 	else \
-		echo "  ❌ Image not found locally. Run 'make build' first."; \
+		echo "  ❌ Image not found locally. Run 'make local-build' first."; \
 	fi
 	@echo ""
 	@echo "💡 To view build info at runtime, check /app/build_info.txt inside container"
 
-# Clean target - remove local images
-.PHONY: clean
-clean:
+# Local clean target
+.PHONY: local-clean
+local-clean:
 	@echo "Removing local Docker images..."
 	@docker rmi $(LOCAL_IMAGE):$(VERSION) 2>/dev/null || echo "Image $(LOCAL_IMAGE):$(VERSION) not found"
 	@echo "Cleanup complete"
 
-# SAM targets
-.PHONY: sam-validate
-sam-validate:
+# SAM targets (main deployment workflow)
+.PHONY: validate
+validate:
 	@echo "Validating SAM template..."
 	sam validate --template template.yaml
 
-.PHONY: sam-build
-sam-build:
+.PHONY: build
+build:
 	@echo "Building SAM application..."
 	@echo "Note: SAM will build the Docker image from the Dockerfile"
 	sam build --template template.yaml
 
-.PHONY: sam-deploy
-sam-deploy: sam-build
+.PHONY: deploy
+deploy: build
 	@echo "Deploying SAM application to AWS (STAGE=$(STAGE))..."
 	sam deploy \
 		--template template.yaml \
@@ -149,8 +144,8 @@ sam-deploy: sam-build
 		--no-fail-on-empty-changeset \
 		--tags Stage=$(STAGE) Project=roblox-downloader
 
-.PHONY: sam-delete
-sam-delete:
+.PHONY: delete
+delete:
 	@echo "Deleting SAM stack $(STACK_NAME)..."
 	@read -p "Are you sure you want to delete stack $(STACK_NAME)? [y/N] " -n 1 -r; \
 	echo; \
@@ -163,13 +158,13 @@ sam-delete:
 		echo "Deletion cancelled"; \
 	fi
 
-.PHONY: sam-logs
-sam-logs:
+.PHONY: logs
+logs:
 	@echo "Tailing Lambda logs for $(STACK_NAME)..."
 	sam logs --stack-name $(STACK_NAME) --tail
 
-.PHONY: sam-invoke
-sam-invoke:
+.PHONY: invoke
+invoke:
 	@echo "Invoking Lambda function..."
 	aws lambda invoke \
 		--function-name roblox-downloader-$(STAGE) \
@@ -180,8 +175,8 @@ sam-invoke:
 	@cat response.json
 	@rm response.json
 
-.PHONY: sam-status
-sam-status:
+.PHONY: status
+status:
 	@echo "Stack status for $(STACK_NAME):"
 	@aws cloudformation describe-stacks \
 		--stack-name $(STACK_NAME) \
