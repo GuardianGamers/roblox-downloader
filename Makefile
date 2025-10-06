@@ -30,12 +30,12 @@ help:
 	@echo "  make run-task [STAGE=dev|test|prod]    - Manually run ECS task"
 	@echo "  make status [STAGE=dev|test|prod]      - Show stack status"
 	@echo ""
-	@echo "Local Docker testing:"
-	@echo "  make local-build [STAGE=dev]            - Build Docker image locally"
-	@echo "  make local-run [STAGE=dev]              - Run container locally"
-	@echo "  make local-check [STAGE=dev]            - Run version check only"
-	@echo "  make local-info [STAGE=dev]             - Show local build information"
-	@echo "  make local-clean                        - Remove local Docker images"
+	@echo "Docker image management:"
+	@echo "  make docker-build [STAGE=dev]           - Build Docker image"
+	@echo "  make docker-run [STAGE=dev]             - Run container locally (for testing)"
+	@echo "  make docker-check [STAGE=dev]           - Run version check only (local test)"
+	@echo "  make docker-info [STAGE=dev]            - Show image information"
+	@echo "  make docker-clean [STAGE=dev]           - Remove Docker images"
 	@echo ""
 	@echo "  make help                               - Show this help message"
 	@echo ""
@@ -45,9 +45,9 @@ help:
 	@echo "  LOCAL_IMAGE: $(LOCAL_IMAGE):$(VERSION)"
 	@echo "  STACK_NAME: $(STACK_NAME)"
 
-# Local build target
-.PHONY: local-build
-local-build:
+# Docker image management
+.PHONY: docker-build
+docker-build:
 	@BUILD_TIMESTAMP=$$(date -u +"%Y-%m-%dT%H:%M:%SZ"); \
 	echo "Building roblox-downloader locally with timestamp: $$BUILD_TIMESTAMP"; \
 	docker build \
@@ -57,27 +57,25 @@ local-build:
 		-f $(DOCKERFILE) .
 	@echo "Image built locally: $(LOCAL_IMAGE):$(VERSION)"
 
-# Local run target - downloads and extracts to local directory
-.PHONY: local-run
-local-run: local-build
+# Docker run targets (for local testing)
+.PHONY: docker-run
+docker-run: docker-build
 	@echo "Running roblox-downloader locally..."
 	@mkdir -p ./downloads
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION)
 
-# Local version check only
-.PHONY: local-check
-local-check: local-build
+.PHONY: docker-check
+docker-check: docker-build
 	@echo "Checking Roblox version locally..."
 	docker run --rm \
 		-v $(PWD)/downloads:/downloads \
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads --check-only
 
-# Local run with custom arguments
-.PHONY: local-custom
-local-custom: local-build
+.PHONY: docker-custom
+docker-custom: docker-build
 	@echo "Running locally with custom arguments: $(ARGS)"
 	@mkdir -p ./downloads
 	docker run --rm \
@@ -85,9 +83,9 @@ local-custom: local-build
 		$(LOCAL_IMAGE):$(VERSION) \
 		python download_roblox.py --output-dir /downloads $(ARGS)
 
-# Local ECR push target (standalone, without SAM)
-.PHONY: local-push-ecr
-local-push-ecr: local-build
+# Standalone ECR push (not typically needed, use 'make push' instead)
+.PHONY: docker-push-ecr
+docker-push-ecr: docker-build
 	@echo "Pushing local image to ECR..."
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
 	aws ecr describe-repositories --repository-names $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null 2>&1 || aws ecr create-repository --repository-name $(LOCAL_IMAGE) --region $(AWS_REGION) --output text > /dev/null
@@ -95,9 +93,8 @@ local-push-ecr: local-build
 	docker push $(ECR_IMAGE):$(VERSION)
 	@echo "Image deployed: $(ECR_IMAGE):$(VERSION)"
 
-# Local build info target
-.PHONY: local-info
-local-info:
+.PHONY: docker-info
+docker-info:
 	@echo "Local Docker Image Information (STAGE=$(STAGE)):"
 	@echo "================================================="
 	@echo ""
@@ -109,15 +106,14 @@ local-info:
 		echo "  📊 Image Size: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.Size}}' | tail -n +2)"; \
 		echo "  🆔 Image ID: $$(docker image ls $(LOCAL_IMAGE):$(VERSION) --format 'table {{.ID}}' | tail -n +2)"; \
 	else \
-		echo "  ❌ Image not found locally. Run 'make local-build' first."; \
+		echo "  ❌ Image not found. Run 'make docker-build' first."; \
 	fi
 	@echo ""
 	@echo "💡 To view build info at runtime, check /app/build_info.txt inside container"
 
-# Local clean target
-.PHONY: local-clean
-local-clean:
-	@echo "Removing local Docker images..."
+.PHONY: docker-clean
+docker-clean:
+	@echo "Removing Docker images..."
 	@docker rmi $(LOCAL_IMAGE):$(VERSION) 2>/dev/null || echo "Image $(LOCAL_IMAGE):$(VERSION) not found"
 	@echo "Cleanup complete"
 
@@ -129,22 +125,30 @@ validate:
 	@echo "Template is valid!"
 
 .PHONY: build
-build: local-build
+build: docker-build
 	@echo "Tagging image for ECR..."
 	docker tag $(LOCAL_IMAGE):$(VERSION) $(ECR_IMAGE):latest
 
 .PHONY: push
 push: build
 	@echo "Pushing Docker image to ECR..."
-	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	aws ecr describe-repositories --repository-names roblox-downloader-$(STAGE) --region $(AWS_REGION) > /dev/null 2>&1 || \
-		aws ecr create-repository --repository-name roblox-downloader-$(STAGE) --region $(AWS_REGION)
+	@echo "Creating ECR repository if it doesn't exist..."
+	@aws ecr describe-repositories --repository-names roblox-downloader-$(STAGE) --region $(AWS_REGION) > /dev/null 2>&1 || \
+		aws ecr create-repository \
+			--repository-name roblox-downloader-$(STAGE) \
+			--region $(AWS_REGION) \
+			--image-scanning-configuration scanOnPush=true \
+			--tags Key=Environment,Value=$(STAGE) Key=Project,Value=roblox-downloader
+	@echo "Logging into ECR..."
+	@aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	@echo "Pushing image..."
 	docker push $(ECR_IMAGE):latest
 	@echo "Image pushed: $(ECR_IMAGE):latest"
 
 .PHONY: deploy
 deploy: push
 	@echo "Deploying CloudFormation stack (STAGE=$(STAGE))..."
+	@echo "Docker image already pushed to: $(ECR_IMAGE):latest"
 	aws cloudformation deploy \
 		--template-file template.yaml \
 		--stack-name $(STACK_NAME) \

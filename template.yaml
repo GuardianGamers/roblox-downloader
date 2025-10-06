@@ -84,32 +84,8 @@ Resources:
         - Key: Project
           Value: roblox-downloader
 
-  # ECR Repository for Docker image
-  RobloxDownloaderRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub "roblox-downloader-${Stage}"
-      ImageScanningConfiguration:
-        ScanOnPush: true
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [{
-              "rulePriority": 1,
-              "description": "Keep last 5 images",
-              "selection": {
-                "tagStatus": "any",
-                "countType": "imageCountMoreThan",
-                "countNumber": 5
-              },
-              "action": { "type": "expire" }
-            }]
-          }
-      Tags:
-        - Key: Environment
-          Value: !Ref Stage
-        - Key: Project
-          Value: roblox-downloader
+  # Note: ECR Repository is created by the Makefile during docker push
+  # This keeps build artifacts separate from runtime infrastructure
 
   # IAM Role for ECS Task Execution (pulling images, logs)
   RobloxDownloaderExecutionRole:
@@ -135,7 +111,7 @@ Resources:
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
                   - ecr:BatchCheckLayerAvailability
-                Resource: !GetAtt RobloxDownloaderRepository.Arn
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/roblox-downloader-${Stage}"
       Tags:
         - Key: Environment
           Value: !Ref Stage
@@ -200,7 +176,7 @@ Resources:
       TaskRoleArn: !GetAtt RobloxDownloaderTaskRole.Arn
       ContainerDefinitions:
         - Name: roblox-downloader
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RobloxDownloaderRepository}:latest"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/roblox-downloader-${Stage}:latest"
           Essential: true
           LogConfiguration:
             LogDriver: awslogs
@@ -470,8 +446,8 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ECSTaskDefinitionArn"
   
   ECRRepositoryUri:
-    Description: URI of the ECR repository
-    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RobloxDownloaderRepository}"
+    Description: URI of the ECR repository (created by Makefile)
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/roblox-downloader-${Stage}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
   
