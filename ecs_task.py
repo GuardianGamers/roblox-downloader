@@ -166,7 +166,7 @@ def main():
             version_param = f"/guardiangamer/{stage}/roblox/current-version"
             put_ssm_parameter(version_param, current_apkcombo_version)
             
-            return {
+            result = {
                 'statusCode': 200,
                 'body': json.dumps({
                     'message': 'Version already exists in S3',
@@ -174,6 +174,25 @@ def main():
                     'skipped': True
                 })
             }
+            
+            # Update gameservers even if APK was skipped
+            if update_games and action in ['all', 'gameservers']:
+                print("\n" + "=" * 60)
+                print("UPDATING GAMESERVERS (APK skipped but updating games)")
+                print("=" * 60)
+                
+                gameservers_result = update_gameservers(
+                    bucket_name=bucket_name,
+                    s3_prefix=""  # Store in root of bucket under gameservers/
+                )
+                
+                # Merge results
+                result_body = json.loads(result['body'])
+                gameservers_body = json.loads(gameservers_result['body'])
+                result_body['gameservers'] = gameservers_body
+                result['body'] = json.dumps(result_body)
+            
+            return result
         
         print(f"Proceeding with download of version {current_apkcombo_version}")
         
