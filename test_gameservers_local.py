@@ -46,7 +46,7 @@ def test_chart_scraper(pages=1, local_dir='./test_gameservers'):
                 sample = games[0]
                 print(f"  Name: {sample.get('name', 'N/A')}")
                 print(f"  Place ID: {sample.get('place_id', 'N/A')}")
-            return games[:5]  # Return first 5 for AI testing
+            return games  # Return all games for AI testing
         except Exception as e:
             print(f"⚠️  Failed to load gameservers.json: {e}, fetching fresh...")
     
@@ -69,39 +69,77 @@ def test_chart_scraper(pages=1, local_dir='./test_gameservers'):
         print(f"  Place ID: {sample.get('place_id', 'N/A')}")
         print(f"  Description: {sample.get('description', 'N/A')[:100]}...")
         print(f"  Categories: {sample.get('categories', [])}")
-        return games[:5]  # Return first 5 for AI testing
+        return games  # Return all games for AI testing
     else:
         print("❌ Failed to fetch games")
         return []
 
 def test_ai_moderation(games):
-    """Test 2: Test AI moderation on sample games."""
+    """Test 2: Test AI moderation on all games."""
     print("\n" + "="*60)
-    print("TEST 2: Testing AI moderation on sample games")
+    print("TEST 2: Testing AI moderation on ALL games")
     print("="*60)
     
     if not games:
         print("⚠️  No games to test")
         return
     
-    for i, game in enumerate(games[:3], 1):  # Test first 3 games
-        print(f"\n--- Game {i}: {game.get('name', 'Unknown')} ---")
-        print(f"Original description: {game.get('description', 'N/A')[:150]}...")
+    total = len(games)
+    excluded_count = 0
+    modified_count = 0
+    unchanged_count = 0
+    error_count = 0
+    
+    for i, game in enumerate(games, 1):
+        game_name = game.get('name', 'Unknown')
+        original_desc = game.get('description', '')
+        
+        print(f"\n[{i}/{total}] {game_name}")
         
         try:
-            result = sanitize_description_with_ai(
-                game.get('description', ''),
-                game.get('name', 'Unknown')
-            )
+            result = sanitize_description_with_ai(original_desc, game_name)
             
-            print(f"\n✅ AI Result:")
-            print(f"  Appropriate for <13: {result['is_appropriate_for_under13']}")
-            print(f"  Flags: {result.get('flags', [])}")
-            print(f"  Reasoning: {result.get('reasoning', 'N/A')}")
-            print(f"  Sanitized desc: {result['sanitized_description'][:150]}...")
+            sanitized_desc = result['sanitized_description']
+            is_appropriate = result['is_appropriate_for_under13']
+            flags = result.get('flags', [])
+            
+            # Check if excluded
+            if not is_appropriate:
+                print(f"  ❌ EXCLUDED - Not appropriate for <13")
+                print(f"  🚩 Flags: {', '.join(flags)}")
+                print(f"  📝 Reasoning: {result.get('reasoning', 'N/A')}")
+                excluded_count += 1
+            # Check if description was modified
+            elif original_desc.strip() != sanitized_desc.strip():
+                print(f"  ✏️  MODIFIED - Description sanitized")
+                print(f"  🚩 Flags: {', '.join(flags) if flags else 'None'}")
+                print(f"\n  📄 BEFORE:")
+                print(f"  {original_desc[:200]}{'...' if len(original_desc) > 200 else ''}")
+                print(f"\n  📄 AFTER:")
+                print(f"  {sanitized_desc[:200]}{'...' if len(sanitized_desc) > 200 else ''}")
+                modified_count += 1
+            else:
+                print(f"  ✅ OK - No changes needed")
+                unchanged_count += 1
+            
+            # Progress update every 10 games
+            if i % 10 == 0:
+                print(f"\n  Progress: {i}/{total} games processed ({(i/total)*100:.1f}%)")
             
         except Exception as e:
-            print(f"❌ AI moderation failed: {e}")
+            print(f"  ❌ ERROR: {e}")
+            error_count += 1
+    
+    # Summary
+    print(f"\n" + "="*60)
+    print(f"AI MODERATION SUMMARY")
+    print("="*60)
+    print(f"Total games: {total}")
+    print(f"  ✅ Unchanged: {unchanged_count}")
+    print(f"  ✏️  Modified: {modified_count}")
+    print(f"  ❌ Excluded: {excluded_count}")
+    print(f"  ⚠️  Errors: {error_count}")
+    print("="*60)
 
 def test_s3_operations(use_s3=True):
     """Test 3: Test S3 operations (load/save exclusions)."""
@@ -204,7 +242,7 @@ def main():
                 print(f"\n📦 Loading games from {gameservers_file} for AI test...")
                 try:
                     with open(gameservers_file, 'r') as f:
-                        games = json.load(f)[:5]  # First 5 for AI testing
+                        games = json.load(f)  # Load all games for AI testing
                 except Exception as e:
                     print(f"⚠️  Failed to load gameservers.json: {e}, fetching fresh...")
                     games = fetch_latest_roblox_games(pages_per_category=1)
