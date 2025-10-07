@@ -17,6 +17,8 @@ import sys
 import json
 import boto3
 import subprocess
+import zipfile
+import tempfile
 from datetime import datetime
 from typing import Dict, List, Set, Optional
 from pathlib import Path
@@ -338,6 +340,36 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
         log(f"Error loading exclusion list: {e}")
         return {}
 
+def create_gameservers_zip(games: List[Dict], output_path: Path) -> None:
+    """
+    Create a zip file with gameservers data structured as:
+    /gameservers/gameservers.json
+    /gameservers/roblox<id>.json (one file per gameserver)
+    
+    Args:
+        games: List of game data
+        output_path: Path where the zip file should be created
+    """
+    log(f"Creating gameservers.zip with {len(games)} individual game files...")
+    
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Add the main gameservers.json file
+        gameservers_json = json.dumps(games, indent=2)
+        zipf.writestr('gameservers/gameservers.json', gameservers_json)
+        log(f"  Added gameservers/gameservers.json")
+        
+        # Add individual files for each gameserver
+        for game in games:
+            # Use the 'id' field which is in the format "roblox<place_id>"
+            game_id = game.get('id', f"roblox{game.get('place_id', 'unknown')}")
+            filename = f"gameservers/{game_id}.json"
+            game_json = json.dumps(game, indent=2)
+            zipf.writestr(filename, game_json)
+        
+        log(f"  Added {len(games)} individual game files")
+    
+    log(f"Gameservers.zip created successfully: {output_path}")
+
 def save_gameservers_to_s3(
     games: List[Dict],
     exclusions: Dict[str, Dict],
@@ -347,6 +379,7 @@ def save_gameservers_to_s3(
 ) -> str:
     """
     Save updated gameservers.json and exclusions to S3 or local directory with today's date.
+    Also creates a gameservers.zip file with individual game files.
     
     Args:
         games: List of game data
@@ -383,6 +416,10 @@ def save_gameservers_to_s3(
         with open(daily_dir / "exclusions.json", 'w') as f:
             f.write(exclusions_data)
         
+        # Create gameservers.zip
+        zip_path = daily_dir / "gameservers.zip"
+        create_gameservers_zip(games, zip_path)
+        
         log(f"Saved {len(games)} games and {len(exclusions)} exclusions locally")
         return str(daily_dir)
     
@@ -408,6 +445,28 @@ def save_gameservers_to_s3(
         ContentType='application/json',
         ServerSideEncryption='AES256'
     )
+    
+    # Create and save gameservers.zip
+    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.zip') as tmp_zip:
+        tmp_zip_path = Path(tmp_zip.name)
+    
+    try:
+        create_gameservers_zip(games, tmp_zip_path)
+        
+        # Upload to S3
+        with open(tmp_zip_path, 'rb') as f:
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f"{daily_prefix}gameservers.zip",
+                Body=f.read(),
+                ContentType='application/zip',
+                ServerSideEncryption='AES256'
+            )
+        log(f"Uploaded gameservers.zip to S3")
+    finally:
+        # Clean up temp file
+        if tmp_zip_path.exists():
+            tmp_zip_path.unlink()
     
     log(f"Saved {len(games)} games and {len(exclusions)} exclusions")
     return daily_prefix
