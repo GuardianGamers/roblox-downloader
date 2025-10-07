@@ -212,6 +212,8 @@ Resources:
               Value: "false"
             - Name: UPDATE_GAMESERVERS
               Value: "true"
+            - Name: USE_LOCAL_IMAGES
+              Value: "true"
       Tags:
         - Key: Environment
           Value: !Ref Stage
