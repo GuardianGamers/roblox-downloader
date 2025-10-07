@@ -147,21 +147,91 @@ def analyze_apk_signature(apk_path: Path) -> None:
                 v3_block = pair
                 print(f"  ✓ Found APK Signature Scheme V3 Block")
         
-        # Display v3 signature info (preferred)
+        # Display v3 signature info with certificate details (preferred)
         if has_v3:
             print("\n[APK Signature Scheme V3]")
             print(f"  ✓ Found V3 Signature Block")
             print(f"  Block ID: 0x{v3_block.id:08x} ({v3_block.id})")
             print(f"  Block Size: {v3_block.length} bytes")
             print(f"  V3 signatures are the most secure and support key rotation")
+            
+            # Display signer/certificate info
+            try:
+                # v3_block.value is already a parsed APKSignatureSchemeBlock
+                v3_data = v3_block.value
+                if hasattr(v3_data, 'signers') and v3_data.signers:
+                    print(f"\n  Signers: {len(v3_data.signers)}")
+                    for i, signer in enumerate(v3_data.signers, 1):
+                        print(f"\n  Signer #{i}:")
+                        
+                        # Show public key fingerprint
+                        if hasattr(signer, 'public_key') and signer.public_key:
+                            import hashlib
+                            # public_key.data contains the actual bytes
+                            pk_data = signer.public_key.data if hasattr(signer.public_key, 'data') else signer.public_key
+                            pk_sha256 = hashlib.sha256(pk_data).hexdigest()
+                            pk_sha1 = hashlib.sha1(pk_data).hexdigest()
+                            print(f"    Public Key SHA-256: {pk_sha256}")
+                            print(f"    Public Key SHA-1:   {pk_sha1}")
+                        
+                        # Show certificate details - they're in signed_data
+                        if hasattr(signer, 'signed_data') and hasattr(signer.signed_data, 'certificates'):
+                            certificates = signer.signed_data.certificates
+                            if certificates:
+                                print(f"\n    Certificates: {len(certificates)}")
+                                for j, cert in enumerate(certificates, 1):
+                                    print(f"\n    Certificate #{j}:")
+                                    # cert.data contains the actual certificate bytes
+                                    cert_data = cert.data if hasattr(cert, 'data') else cert
+                                    cert_info = show_x509_certificate(cert_data, indent=3)
+                                    print(cert_info)
+            except Exception as e:
+                print(f"  (Could not parse signer details: {e})")
+                import traceback
+                traceback.print_exc()
         
-        # Display v2 signature info
+        # Display v2 signature info with certificate details
         if has_v2:
             print("\n[APK Signature Scheme V2]")
             print(f"  ✓ Found V2 Signature Block")
             print(f"  Block ID: 0x{v2_block.id:08x} ({v2_block.id})")
             print(f"  Block Size: {v2_block.length} bytes")
             print(f"  V2 signatures protect the entire APK file")
+            
+            # Display signer/certificate info
+            try:
+                # v2_block.value is already a parsed APKSignatureSchemeBlock
+                v2_data = v2_block.value
+                if hasattr(v2_data, 'signers') and v2_data.signers:
+                    print(f"\n  Signers: {len(v2_data.signers)}")
+                    for i, signer in enumerate(v2_data.signers, 1):
+                        print(f"\n  Signer #{i}:")
+                        
+                        # Show public key fingerprint
+                        if hasattr(signer, 'public_key') and signer.public_key:
+                            import hashlib
+                            # public_key.data contains the actual bytes
+                            pk_data = signer.public_key.data if hasattr(signer.public_key, 'data') else signer.public_key
+                            pk_sha256 = hashlib.sha256(pk_data).hexdigest()
+                            pk_sha1 = hashlib.sha1(pk_data).hexdigest()
+                            print(f"    Public Key SHA-256: {pk_sha256}")
+                            print(f"    Public Key SHA-1:   {pk_sha1}")
+                        
+                        # Show certificate details - they're in signed_data
+                        if hasattr(signer, 'signed_data') and hasattr(signer.signed_data, 'certificates'):
+                            certificates = signer.signed_data.certificates
+                            if certificates:
+                                print(f"\n    Certificates: {len(certificates)}")
+                                for j, cert in enumerate(certificates, 1):
+                                    print(f"\n    Certificate #{j}:")
+                                    # cert.data contains the actual certificate bytes
+                                    cert_data = cert.data if hasattr(cert, 'data') else cert
+                                    cert_info = show_x509_certificate(cert_data, indent=3)
+                                    print(cert_info)
+            except Exception as e:
+                print(f"  (Could not parse signer details: {e})")
+                import traceback
+                traceback.print_exc()
         
         if not has_v2 and not has_v3:
             print("  No v2/v3 signatures found in signing block")
