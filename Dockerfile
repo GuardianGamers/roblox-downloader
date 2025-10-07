@@ -11,7 +11,7 @@ LABEL build.component="roblox-downloader"
 
 WORKDIR /app
 
-# Install system dependencies required for Playwright/Chromium
+# Install system dependencies required for Playwright/Chromium and Pillow
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -35,6 +35,10 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     xdg-utils \
     xauth \
+    libjpeg62-turbo \
+    libpng16-16 \
+    libwebp7 \
+    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
