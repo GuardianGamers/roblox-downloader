@@ -61,10 +61,12 @@ def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None
         # Create scraper instance
         scraper = roblox_charts_scraper.RobloxChartsScraper()
         
-        # Fetch games from all categories
+        # Fetch games from all categories (pass exclusions to skip enrichment for them)
         log(f"Fetching {pages_per_category} pages per category...")
+        log(f"Skipping enrichment for {len(exclude_place_ids)} excluded games...")
         all_games = scraper.fetch_all_categories(
-            max_pages_per_category=pages_per_category
+            max_pages_per_category=pages_per_category,
+            exclude_place_ids=exclude_place_ids
         )
         
         if not all_games:

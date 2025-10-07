@@ -444,7 +444,7 @@ class RobloxChartsScraper:
         print(f"  ✅ Category complete: {len(category_games)} unique games from {page_count} pages")
         return category_games
     
-    def fetch_all_categories(self, max_pages_per_category: int = 5) -> List[Dict]:
+    def fetch_all_categories(self, max_pages_per_category: int = 5, exclude_place_ids: set = None) -> List[Dict]:
         """
         Fetch games from all available categories.
         
@@ -452,6 +452,7 @@ class RobloxChartsScraper:
         
         Args:
             max_pages_per_category: Maximum number of pages to fetch
+            exclude_place_ids: Set of place IDs to skip enrichment for (excluded games)
             
         Returns:
             List of all unique games across categories
@@ -555,27 +556,36 @@ class RobloxChartsScraper:
         if all_games:
             print(f"\n🔍 PHASE 2: Fetching additional details for {len(all_games)} games...")
             print("=" * 60)
-            self._enrich_games_with_details(all_games)
+            self._enrich_games_with_details(all_games, exclude_place_ids=exclude_place_ids)
         
         return all_games
     
-    def _enrich_games_with_details(self, games: List[Dict]) -> None:
+    def _enrich_games_with_details(self, games: List[Dict], exclude_place_ids: set = None) -> None:
         """
         Enrich games with additional details (descriptions, thumbnails) from Roblox API.
         Modifies the games list in-place.
         
         Args:
             games: List of games to enrich
+            exclude_place_ids: Set of place IDs to skip (excluded games - don't waste API calls)
         """
+        if exclude_place_ids is None:
+            exclude_place_ids = set()
         if not ROBLOX_API_AVAILABLE:
             print("  ℹ️  Roblox API not available, skipping detail fetching")
             return
         
         total = len(games)
+        skipped_excluded = 0
         for i, game in enumerate(games, 1):
             universe_id = game.get('universeId')
             place_id = game.get('rootPlaceId')
             game_name = game.get('name', 'Unknown')
+            
+            # Skip excluded games (don't waste API calls on them)
+            if str(place_id) in exclude_place_ids:
+                skipped_excluded += 1
+                continue
             
             if not universe_id:
                 print(f"  [{i}/{total}] ⚠️  {game_name}: No universe_id, skipping")
@@ -630,7 +640,9 @@ class RobloxChartsScraper:
             except Exception as e:
                 print(f"  [{i}/{total}] ❌ {game_name}: {e}")
         
-        print(f"\n  ✅ Detail fetching complete!")
+        if skipped_excluded > 0:
+            print(f"\n  ⏭️  Skipped {skipped_excluded} excluded games (no API calls wasted)")
+        print(f"  ✅ Detail fetching complete!")
         print("=" * 60)
     
     def fetch_games_page(self, page_token: str = None) -> Optional[Dict]:
