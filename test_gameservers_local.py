@@ -114,9 +114,12 @@ def test_ai_moderation(games):
                 print(f"  ✏️  MODIFIED - Description sanitized")
                 print(f"  🚩 Flags: {', '.join(flags) if flags else 'None'}")
                 print(f"\n  📄 BEFORE:")
-                print(f"  {original_desc[:200]}{'...' if len(original_desc) > 200 else ''}")
+                # Show full description, indent each line
+                for line in original_desc.split('\n'):
+                    print(f"  {line}")
                 print(f"\n  📄 AFTER:")
-                print(f"  {sanitized_desc[:200]}{'...' if len(sanitized_desc) > 200 else ''}")
+                for line in sanitized_desc.split('\n'):
+                    print(f"  {line}")
                 modified_count += 1
             else:
                 print(f"  ✅ OK - No changes needed")
