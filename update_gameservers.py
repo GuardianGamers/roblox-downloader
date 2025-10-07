@@ -456,6 +456,14 @@ def save_gameservers_to_s3(
     if gamecategories_path is None:
         gamecategories_path = os.path.join(os.path.dirname(__file__), 'gamecategories.json')
     
+    # Filter out games without img attribute
+    games_before_filter = len(games)
+    games = [game for game in games if game.get('img')]
+    games_filtered = games_before_filter - len(games)
+    
+    if games_filtered > 0:
+        log(f"⚠️  Filtered out {games_filtered} games without img attribute ({len(games)} remaining)")
+    
     gameservers_data = json.dumps(games, indent=2)
     exclusions_data = json.dumps({
         "exclusions": exclusions,
