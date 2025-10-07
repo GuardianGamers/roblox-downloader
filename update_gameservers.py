@@ -388,10 +388,23 @@ def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_pat
     log(f"Creating metadata.zip for public distribution...")
     
     # Clean up games data by removing internal fields
+    # Important: Ensure 'access' appears early in JSON for client parsing
+    excluded_fields = ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization', 'serverFiles']
+    
     cleaned_games = []
     for game in games:
-        cleaned_game = {k: v for k, v in game.items() 
-                       if k not in ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization', 'serverFiles']}
+        # Create new dict with 'access' first, then other fields in order
+        cleaned_game = {}
+        
+        # Add 'access' first if it exists
+        if 'access' in game:
+            cleaned_game['access'] = game['access']
+        
+        # Add all other fields (except excluded ones)
+        for k, v in game.items():
+            if k not in excluded_fields and k != 'access':  # Skip 'access' since we already added it
+                cleaned_game[k] = v
+        
         cleaned_games.append(cleaned_game)
     
     with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
