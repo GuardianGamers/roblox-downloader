@@ -34,18 +34,22 @@ def log(message: str):
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     print(f"[{timestamp} UTC] {message}")
 
-def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None) -> List[Dict]:
+def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None, exclude_place_ids: Set[str] = None) -> List[Dict]:
     """
     Fetch latest games from Roblox charts using existing scraper.
     
     Args:
         pages_per_category: Number of pages to fetch per category
         max_games: Maximum number of games to process (for testing)
+        exclude_place_ids: Set of place IDs to skip (already excluded games)
         
     Returns:
         List of game data dictionaries
     """
     log("Fetching latest Roblox games from charts...")
+    
+    if exclude_place_ids is None:
+        exclude_place_ids = set()
     
     try:
         # Import the scraper as a module
@@ -66,6 +70,20 @@ def fetch_latest_roblox_games(pages_per_category: int = 5, max_games: int = None
             return []
         
         log(f"Fetched {len(all_games)} raw games from Roblox API")
+        
+        # Filter out excluded games BEFORE fetching details
+        if exclude_place_ids:
+            filtered_games = []
+            skipped_count = 0
+            for game in all_games:
+                place_id = str(game.get('rootPlaceId', ''))
+                if place_id in exclude_place_ids:
+                    skipped_count += 1
+                else:
+                    filtered_games.append(game)
+            
+            log(f"Filtered out {skipped_count} excluded games, {len(filtered_games)} remaining")
+            all_games = filtered_games
         
         # Convert to gameserver format (in memory, not writing to file)
         log(f"Converting to gameserver format...")
@@ -385,9 +403,12 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     except Exception as e:
         log(f"Could not load existing gameservers: {e}")
     
-    # Fetch latest games from Roblox
-    # Limit to 20 games for initial testing to reduce AI costs
-    raw_games = fetch_latest_roblox_games(pages_per_category=5, max_games=None)
+    # Fetch latest games from Roblox (exclude already-excluded games to save API calls)
+    raw_games = fetch_latest_roblox_games(
+        pages_per_category=5,
+        max_games=None,
+        exclude_place_ids=set(existing_exclusions.keys())
+    )
     
     if not raw_games:
         return {
@@ -408,10 +429,7 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         place_id = str(game.get('place_id', ''))
         processed_place_ids.add(place_id)  # Track that we've seen this game
         
-        # Skip if already excluded
-        if place_id in existing_exclusions:
-            log(f"  Skipping {place_id} (already excluded)")
-            continue
+        # Note: Already-excluded games were filtered out during fetch, so we don't need to check again
         
         # Get current description from API
         current_description = game.get('description', '')
@@ -474,10 +492,10 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     
     log("=" * 60)
     log(f"Gameservers update complete!")
-    log(f"  API Games: {len(raw_games)}")
+    log(f"  API Games Processed: {len(raw_games)} (already-excluded filtered out)")
     log(f"  Legacy Games: {len(legacy_games)}")
     log(f"  Total Games: {len(processed_games)}")
-    log(f"  Excluded: {len(new_exclusions)} total ({len(new_exclusions) - len(existing_exclusions)} new)")
+    log(f"  Total Exclusions: {len(new_exclusions)} ({len(new_exclusions) - len(existing_exclusions)} new)")
     log(f"  AI Calls Made: {ai_calls_made}")
     log(f"  AI Calls Saved: {ai_calls_saved} (reused existing sanitization)")
     if local_dir:
