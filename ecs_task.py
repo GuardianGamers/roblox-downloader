@@ -58,6 +58,94 @@ def upload_to_s3(local_path, bucket_name, s3_key):
         print(f"Error uploading to S3: {e}")
         return False
 
+def upload_error_report_to_s3(bucket_name, error_type, error_details, debug_files=None):
+    """
+    Upload error report and debug files to S3 under errors/<timestamp>/.
+    
+    Args:
+        bucket_name: S3 bucket name
+        error_type: Type of error (e.g., 'version_detection', 'download_failed')
+        error_details: Dict with error information
+        debug_files: List of file paths to upload (screenshots, logs, etc.)
+    
+    Returns:
+        S3 path where error was uploaded
+    """
+    from datetime import datetime
+    import platform
+    
+    timestamp = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S-UTC')
+    error_prefix = f"errors/{timestamp}/"
+    
+    print(f"\n{'='*60}")
+    print(f"UPLOADING ERROR REPORT TO S3")
+    print(f"{'='*60}")
+    print(f"Error type: {error_type}")
+    print(f"S3 location: s3://{bucket_name}/{error_prefix}")
+    
+    try:
+        # Create error report
+        error_report = {
+            'timestamp': timestamp,
+            'error_type': error_type,
+            'error_details': error_details,
+            'environment': {
+                'platform': platform.platform(),
+                'python_version': platform.python_version(),
+                'hostname': platform.node(),
+            }
+        }
+        
+        # Upload error report JSON
+        report_key = f"{error_prefix}error_report.json"
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=report_key,
+            Body=json.dumps(error_report, indent=2),
+            ContentType='application/json',
+            ServerSideEncryption='AES256'
+        )
+        print(f"✓ Uploaded error report: {report_key}")
+        
+        # Upload debug files if provided
+        if debug_files:
+            for file_path in debug_files:
+                if os.path.exists(file_path):
+                    filename = os.path.basename(file_path)
+                    file_key = f"{error_prefix}{filename}"
+                    
+                    # Determine content type
+                    content_type = 'application/octet-stream'
+                    if filename.endswith('.png'):
+                        content_type = 'image/png'
+                    elif filename.endswith('.html'):
+                        content_type = 'text/html'
+                    elif filename.endswith('.txt') or filename.endswith('.log'):
+                        content_type = 'text/plain'
+                    
+                    with open(file_path, 'rb') as f:
+                        s3_client.put_object(
+                            Bucket=bucket_name,
+                            Key=file_key,
+                            Body=f.read(),
+                            ContentType=content_type,
+                            ServerSideEncryption='AES256'
+                        )
+                    print(f"✓ Uploaded debug file: {file_key}")
+                else:
+                    print(f"⚠️  Debug file not found: {file_path}")
+        
+        print(f"{'='*60}")
+        print(f"Error report uploaded successfully")
+        print(f"View at: s3://{bucket_name}/{error_prefix}")
+        print(f"{'='*60}\n")
+        
+        return f"s3://{bucket_name}/{error_prefix}"
+        
+    except Exception as e:
+        print(f"❌ Error uploading error report: {e}")
+        return None
+
 def validate_roblox_version(version):
     """
     Validate that the version is in the correct Roblox format: 2.xxx.xxx
@@ -82,13 +170,21 @@ def validate_roblox_version(version):
     except ValueError:
         return False
 
-def get_current_version_from_apkcombo():
+def get_current_version_from_apkcombo(bucket_name=None):
     """
     Get the current Roblox version from APKCombo.
     Validates format and retries if invalid.
+    
+    Args:
+        bucket_name: Optional S3 bucket name for error reporting
+    
+    Returns:
+        Version string or None if failed
     """
     max_attempts = 3
     retry_delay = 180  # 3 minutes
+    all_stdout = []
+    all_stderr = []
     
     for attempt in range(max_attempts):
         try:
@@ -98,12 +194,17 @@ def get_current_version_from_apkcombo():
                 time.sleep(retry_delay)
             
             print(f"Checking current Roblox version on APKCombo (attempt {attempt + 1}/{max_attempts})...")
+            
+            # Run with screenshot on error
             result = subprocess.run(
-                ['python', '/app/download_roblox.py', '--check-only', '--output-dir', '/tmp'],
+                ['python', '/app/download_roblox.py', '--check-only', '--output-dir', '/tmp/version_check'],
                 capture_output=True,
                 text=True,
                 timeout=60
             )
+            
+            all_stdout.append(f"=== Attempt {attempt + 1} stdout ===\n{result.stdout}")
+            all_stderr.append(f"=== Attempt {attempt + 1} stderr ===\n{result.stderr}")
             
             # Parse version from output
             for line in result.stdout.split('\n'):
@@ -122,14 +223,58 @@ def get_current_version_from_apkcombo():
                             continue
                         else:
                             print(f"Failed to get valid version after {max_attempts} attempts")
+                            # Upload error report on final failure
+                            if bucket_name:
+                                upload_error_report_to_s3(
+                                    bucket_name=bucket_name,
+                                    error_type='invalid_version_format',
+                                    error_details={
+                                        'detected_version': version,
+                                        'expected_format': '2.xxx.xxx',
+                                        'attempts': max_attempts,
+                                        'stdout': '\n\n'.join(all_stdout),
+                                        'stderr': '\n\n'.join(all_stderr),
+                                        'return_code': result.returncode
+                                    },
+                                    debug_files=_find_debug_files('/tmp/version_check')
+                                )
                             return None
             
             print(f"Could not parse version from APKCombo output")
             
+        except subprocess.TimeoutExpired as e:
+            print(f"Timeout checking version (attempt {attempt + 1}): {e}")
+            all_stdout.append(f"=== Attempt {attempt + 1} timeout ===\n{e.stdout if e.stdout else 'No stdout'}")
+            all_stderr.append(f"=== Attempt {attempt + 1} timeout ===\n{e.stderr if e.stderr else 'No stderr'}")
         except Exception as e:
-            print(f"Error checking version: {e}")
+            print(f"Error checking version (attempt {attempt + 1}): {e}")
+            all_stderr.append(f"=== Attempt {attempt + 1} exception ===\n{str(e)}")
+    
+    # All attempts failed - upload error report
+    if bucket_name:
+        upload_error_report_to_s3(
+            bucket_name=bucket_name,
+            error_type='version_detection_failed',
+            error_details={
+                'error': 'Could not detect version after all attempts',
+                'attempts': max_attempts,
+                'stdout': '\n\n'.join(all_stdout),
+                'stderr': '\n\n'.join(all_stderr)
+            },
+            debug_files=_find_debug_files('/tmp/version_check')
+        )
     
     return None
+
+def _find_debug_files(directory):
+    """Find all debug files (screenshots, HTML, logs) in a directory."""
+    debug_files = []
+    if os.path.exists(directory):
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if file.endswith(('.png', '.html', '.log', '.txt')):
+                    debug_files.append(os.path.join(root, file))
+    return debug_files
 
 def version_exists_in_s3(bucket_name, s3_prefix, version):
     """Check if a specific version already exists in S3."""
@@ -198,8 +343,8 @@ def main():
             if force:
                 cmd.append('--force')
         
-        # Get current version from APKCombo
-        current_apkcombo_version = get_current_version_from_apkcombo()
+        # Get current version from APKCombo (with error reporting)
+        current_apkcombo_version = get_current_version_from_apkcombo(bucket_name=bucket_name)
         
         if not current_apkcombo_version:
             print("⚠️  Could not determine valid version from APKCombo")
@@ -274,30 +419,79 @@ def main():
         try:
             print(f"Running command: {' '.join(cmd)}")
             print("=" * 60)
-            # Stream output in real-time instead of capturing
+            # Capture output for error reporting
             result = subprocess.run(
                 cmd,
+                capture_output=True,
                 text=True,
                 timeout=850  # Lambda timeout is 900s
             )
+            print(result.stdout)
             print("=" * 60)
             
             if result.returncode != 0:
+                print(f"❌ Download failed with return code {result.returncode}")
+                
+                # Upload error report with debug files
+                error_report_path = upload_error_report_to_s3(
+                    bucket_name=bucket_name,
+                    error_type='download_failed',
+                    error_details={
+                        'version': current_apkcombo_version,
+                        'return_code': result.returncode,
+                        'command': ' '.join(cmd),
+                        'stdout': result.stdout,
+                        'stderr': result.stderr
+                    },
+                    debug_files=_find_debug_files(output_dir)
+                )
+                
                 return {
                     'statusCode': 500,
                     'body': json.dumps({
                         'error': 'Download failed',
                         'returncode': result.returncode,
-                        'stderr': result.stderr
+                        'error_report': error_report_path
                     })
                 }
             
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            print(f"❌ Download timed out after {e.timeout} seconds")
+            
+            # Upload error report for timeout
+            upload_error_report_to_s3(
+                bucket_name=bucket_name,
+                error_type='download_timeout',
+                error_details={
+                    'version': current_apkcombo_version,
+                    'timeout_seconds': e.timeout,
+                    'command': ' '.join(cmd),
+                    'stdout': e.stdout if e.stdout else 'No stdout',
+                    'stderr': e.stderr if e.stderr else 'No stderr'
+                },
+                debug_files=_find_debug_files(output_dir)
+            )
+            
             return {
                 'statusCode': 500,
                 'body': json.dumps({'error': 'Download timed out'})
             }
         except Exception as e:
+            print(f"❌ Unexpected error during download: {e}")
+            
+            # Upload error report for unexpected errors
+            upload_error_report_to_s3(
+                bucket_name=bucket_name,
+                error_type='download_exception',
+                error_details={
+                    'version': current_apkcombo_version,
+                    'exception': str(e),
+                    'exception_type': type(e).__name__,
+                    'command': ' '.join(cmd)
+                },
+                debug_files=_find_debug_files(output_dir)
+            )
+            
             return {
                 'statusCode': 500,
                 'body': json.dumps({'error': str(e)})
