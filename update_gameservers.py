@@ -175,6 +175,78 @@ Respond ONLY with valid JSON in this exact format:
             "reasoning": f"AI analysis failed: {str(e)}"
         }
 
+def update_legacy_games(legacy_games: List[Dict]) -> List[Dict]:
+    """
+    Update legacy games with fresh data from Roblox API.
+    
+    Args:
+        legacy_games: List of games from previous gameservers.json
+        
+    Returns:
+        Updated list of games with fresh data
+    """
+    if not legacy_games:
+        return []
+    
+    try:
+        # Import the scraper to use its API functions
+        sys.path.insert(0, os.path.dirname(ROBLOX_CHARTS_SCRAPER))
+        import roblox_charts_scraper
+        
+        updated_games = []
+        
+        for i, game in enumerate(legacy_games):
+            game_name = game.get('name', 'Unknown')
+            place_id = game.get('place_id', '')
+            universe_id = game.get('universe_id', '')
+            
+            log(f"  [{i+1}/{len(legacy_games)}] Updating legacy game: {game_name}")
+            
+            if not universe_id:
+                log(f"    ⚠️  No universe_id, keeping old data")
+                updated_games.append(game)
+                continue
+            
+            try:
+                # Fetch fresh game details
+                game_details = roblox_charts_scraper.fetch_game_details_v2(universe_id)
+                
+                if game_details:
+                    # Update with fresh data while preserving sanitized description
+                    game['playerCount'] = game_details.get('playing', game.get('playerCount', 0))
+                    game['totalUpVotes'] = game_details.get('favoritedCount', game.get('totalUpVotes', 0))
+                    
+                    # Only update description if we don't have a sanitized one OR if API description changed
+                    api_description = game_details.get('description', '').strip()
+                    orig_description = game.get('orig_description', '')
+                    
+                    if api_description and api_description != orig_description:
+                        # Description changed - needs re-sanitization (we'll handle this later)
+                        log(f"    ⚠️  Description changed for {game_name}, needs AI re-sanitization")
+                        game['orig_description'] = api_description
+                        game['description'] = api_description  # Temporarily use raw description
+                        game['needs_resanitization'] = True
+                    
+                    log(f"    ✓ Updated (players: {game['playerCount']}, votes: {game['totalUpVotes']})")
+                else:
+                    log(f"    ⚠️  Could not fetch details, keeping old data")
+                
+                updated_games.append(game)
+                
+                # Rate limiting
+                import time
+                time.sleep(0.6)  # ~100 requests per minute
+                
+            except Exception as e:
+                log(f"    ❌ Error updating: {e}")
+                updated_games.append(game)  # Keep old data on error
+        
+        return updated_games
+        
+    except Exception as e:
+        log(f"Error updating legacy games: {e}")
+        return legacy_games  # Return original on error
+
 def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None) -> Dict[str, Dict]:
     """
     Load exclusion list of place IDs from S3 or local directory (most recent version).
@@ -477,23 +549,63 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         else:
             processed_games.append(game)
     
-    # Add legacy games (games that exist in old gameservers but not in new API results)
+    # Update legacy games (games that exist in old gameservers but not in new API results)
     legacy_games = []
+    legacy_place_ids = []
     for place_id, game in existing_games.items():
         if place_id not in processed_place_ids and place_id not in new_exclusions:
+            legacy_place_ids.append(place_id)
             legacy_games.append(game)
     
     if legacy_games:
-        log(f"Adding {len(legacy_games)} legacy games (no longer in API but keeping for users)")
-        processed_games.extend(legacy_games)
+        log(f"\n{'='*60}")
+        log(f"Updating {len(legacy_games)} legacy games (no longer in charts but still active)")
+        log(f"{'='*60}")
+        updated_legacy_games = update_legacy_games(legacy_games)
+        
+        # Check for games that need re-sanitization
+        needs_resanitization = [g for g in updated_legacy_games if g.get('needs_resanitization')]
+        if needs_resanitization:
+            log(f"\n⚠️  {len(needs_resanitization)} legacy games have changed descriptions and need AI re-sanitization")
+            log(f"Re-sanitizing descriptions...")
+            
+            for game in needs_resanitization:
+                ai_result = sanitize_description_with_ai(
+                    game['description'],
+                    game.get('name', 'Unknown')
+                )
+                ai_calls_made += 1
+                
+                game['description'] = ai_result['sanitized_description']
+                game['ai_flags'] = ai_result.get('flags', [])
+                game['ai_reasoning'] = ai_result.get('reasoning', '')
+                game.pop('needs_resanitization', None)  # Remove flag
+                
+                # Check if now inappropriate
+                if not ai_result['is_appropriate_for_under13']:
+                    place_id = str(game.get('place_id', ''))
+                    flags = ai_result.get('flags', [])
+                    reason = flags[0].lower().replace(' ', '-').replace('_', '-') if flags else 'inappropriate'
+                    
+                    log(f"  ⚠️  Legacy game {game['name']} now inappropriate, moving to exclusions")
+                    new_exclusions[place_id] = {
+                        'reason': reason,
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'flags': flags,
+                        'reasoning': ai_result.get('reasoning', '')
+                    }
+                    # Don't add to processed_games
+                    updated_legacy_games.remove(game)
+        
+        processed_games.extend(updated_legacy_games)
     
     # Save to S3 or local directory
     save_path = save_gameservers_to_s3(processed_games, new_exclusions, bucket_name, s3_prefix, local_dir=local_dir)
     
     log("=" * 60)
     log(f"Gameservers update complete!")
-    log(f"  API Games Processed: {len(raw_games)} (already-excluded filtered out)")
-    log(f"  Legacy Games: {len(legacy_games)}")
+    log(f"  API Games Processed: {len(raw_games)} (excluded games filtered out)")
+    log(f"  Legacy Games Updated: {len(legacy_games)} (no longer in charts)")
     log(f"  Total Games: {len(processed_games)}")
     log(f"  Total Exclusions: {len(new_exclusions)} ({len(new_exclusions) - len(existing_exclusions)} new)")
     log(f"  AI Calls Made: {ai_calls_made}")
@@ -510,8 +622,8 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
             'message': 'Gameservers updated successfully',
             'save_path': save_path,
             'stats': {
-                'api_games': len(raw_games),
-                'legacy_games': len(legacy_games),
+                'api_games_processed': len(raw_games),
+                'legacy_games_updated': len(legacy_games),
                 'total_games': len(processed_games),
                 'total_exclusions': len(new_exclusions),
                 'new_exclusions': len(new_exclusions) - len(existing_exclusions),
