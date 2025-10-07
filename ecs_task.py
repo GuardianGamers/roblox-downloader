@@ -318,6 +318,9 @@ def main():
     bucket_name = os.environ.get('BUCKET_NAME')
     s3_prefix = os.environ.get('S3_PREFIX', 'apk/')
     
+    # Define SSM parameter path for version tracking
+    version_param = f"/guardiangamer/{stage}/roblox/current-version"
+    
     if not bucket_name:
         return {
             'statusCode': 500,
@@ -382,7 +385,6 @@ def main():
             print(f"Version {current_apkcombo_version} already exists in S3. Skipping download.")
             
             # Update SSM parameter with current version
-            version_param = f"/guardiangamer/{stage}/roblox/current-version"
             put_ssm_parameter(version_param, current_apkcombo_version)
             
             result = {
