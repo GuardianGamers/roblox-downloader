@@ -442,6 +442,75 @@ def create_manifest(extract_dir: str, version: str) -> bool:
         log(f"Error creating manifest.json: {str(e)}")
         return False
 
+def check_apkcombo_online() -> bool:
+    """
+    Check if apkcombo.com is actually online and not showing Cloudflare Always Online page.
+    
+    Returns:
+        True if the site is online, False if it's showing the Cloudflare offline page
+    """
+    log("Checking if apkcombo.com is online...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ]
+        )
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        page = context.new_page()
+        
+        try:
+            # Go to the main apkcombo.com page
+            page.goto('https://apkcombo.com/', wait_until='networkidle', timeout=30000)
+            
+            # Wait a bit for the page to fully load
+            time.sleep(2)
+            
+            # Get the page content
+            page_content = page.content()
+            
+            # Check for Cloudflare Always Online indicators
+            cloudflare_indicators = [
+                "cloudflare.com/always-online",
+                "Cloudflare's Always Online",
+                "Always Online",
+                "This website is offline"
+            ]
+            
+            for indicator in cloudflare_indicators:
+                if indicator in page_content:
+                    log(f"❌ APKCombo appears to be offline (Cloudflare Always Online detected)")
+                    log(f"   Found indicator: '{indicator}'")
+                    browser.close()
+                    return False
+            
+            # Additional check: look for the specific link element
+            always_online_link = page.query_selector('a[href*="cloudflare.com/always-online"]')
+            if always_online_link:
+                log(f"❌ APKCombo is offline - Cloudflare Always Online page detected")
+                browser.close()
+                return False
+            
+            log("✅ APKCombo is online and accessible")
+            browser.close()
+            return True
+            
+        except PlaywrightTimeoutError:
+            log("⚠️  Timeout while checking apkcombo.com status")
+            browser.close()
+            return False
+        except Exception as e:
+            log(f"⚠️  Error checking apkcombo.com status: {e}")
+            browser.close()
+            return False
+
 def verify_apk_signatures(extract_dir: str) -> bool:
     """
     Verify APK signatures to ensure authenticity.
@@ -667,6 +736,24 @@ Examples:
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Check if APKCombo is online before attempting any version checks
+    log("\n" + "="*70)
+    if not check_apkcombo_online():
+        log("\n❌ Cannot proceed: APKCombo.com is offline or unreachable")
+        log("   The site is showing a Cloudflare 'Always Online' cached page")
+        log("   This means version information would be stale/incorrect")
+        log("   Please try again later when the service is back online")
+        log("="*70)
+        
+        # In check-only mode, we can still show local version
+        if args.check_only:
+            local_version = read_local_version(args.output_dir)
+            if local_version:
+                log(f"\nLocal version (site offline, cannot check for updates): {local_version}")
+            return 0
+        return 1
+    log("="*70)
     
     # Check current online version (with debug file saving)
     current_version = get_current_version(args.url, output_dir=args.output_dir)
