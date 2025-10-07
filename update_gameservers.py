@@ -342,6 +342,49 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     existing_exclusions = load_exclusion_list(bucket_name, s3_prefix, local_dir=local_dir)
     log(f"Loaded {len(existing_exclusions)} existing exclusions")
     
+    # Load existing gameservers to preserve legacy games
+    existing_games = {}
+    try:
+        if local_dir:
+            # Load from local directory
+            gameservers_dir = Path(local_dir)
+            date_dirs = sorted([d for d in gameservers_dir.iterdir() if d.is_dir()], reverse=True)
+            if date_dirs:
+                latest_dir = date_dirs[0]
+                gameservers_file = latest_dir / "gameservers.json"
+                if gameservers_file.exists():
+                    log(f"Loading existing gameservers from {gameservers_file}")
+                    with open(gameservers_file, 'r') as f:
+                        old_games = json.load(f)
+                        for game in old_games:
+                            place_id = str(game.get('place_id', ''))
+                            if place_id:
+                                existing_games[place_id] = game
+                    log(f"Loaded {len(existing_games)} existing games")
+        else:
+            # Load from S3
+            response = s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=f"{s3_prefix}gameservers/",
+                Delimiter='/'
+            )
+            
+            if 'CommonPrefixes' in response:
+                directories = sorted([p['Prefix'] for p in response['CommonPrefixes']], reverse=True)
+                if directories:
+                    latest_dir = directories[0]
+                    gameservers_file = f"{latest_dir}gameservers.json"
+                    log(f"Loading existing gameservers from S3: {gameservers_file}")
+                    response = s3_client.get_object(Bucket=bucket_name, Key=gameservers_file)
+                    old_games = json.loads(response['Body'].read())
+                    for game in old_games:
+                        place_id = str(game.get('place_id', ''))
+                        if place_id:
+                            existing_games[place_id] = game
+                    log(f"Loaded {len(existing_games)} existing games from S3")
+    except Exception as e:
+        log(f"Could not load existing gameservers: {e}")
+    
     # Fetch latest games from Roblox
     # Limit to 20 games for initial testing to reduce AI costs
     raw_games = fetch_latest_roblox_games(pages_per_category=5, max_games=None)
@@ -355,11 +398,13 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     # Process each game with AI
     processed_games = []
     new_exclusions = dict(existing_exclusions)  # Copy existing exclusions
+    processed_place_ids = set()  # Track which games we've processed from API
     
     for i, game in enumerate(raw_games):
         log(f"Processing game {i+1}/{len(raw_games)}: {game.get('name', 'Unknown')}")
         
         place_id = str(game.get('place_id', ''))
+        processed_place_ids.add(place_id)  # Track that we've seen this game
         
         # Skip if already excluded
         if place_id in existing_exclusions:
@@ -393,13 +438,24 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         else:
             processed_games.append(game)
     
+    # Add legacy games (games that exist in old gameservers but not in new API results)
+    legacy_games = []
+    for place_id, game in existing_games.items():
+        if place_id not in processed_place_ids and place_id not in new_exclusions:
+            legacy_games.append(game)
+    
+    if legacy_games:
+        log(f"Adding {len(legacy_games)} legacy games (no longer in API but keeping for users)")
+        processed_games.extend(legacy_games)
+    
     # Save to S3 or local directory
     save_path = save_gameservers_to_s3(processed_games, new_exclusions, bucket_name, s3_prefix, local_dir=local_dir)
     
     log("=" * 60)
     log(f"Gameservers update complete!")
-    log(f"  Processed: {len(raw_games)} games")
-    log(f"  Approved: {len(processed_games)} games")
+    log(f"  API Games: {len(raw_games)}")
+    log(f"  Legacy Games: {len(legacy_games)}")
+    log(f"  Total Games: {len(processed_games)}")
     log(f"  Excluded: {len(new_exclusions)} total ({len(new_exclusions) - len(existing_exclusions)} new)")
     if local_dir:
         log(f"  Local path: {save_path}")
@@ -413,8 +469,9 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
             'message': 'Gameservers updated successfully',
             'save_path': save_path,
             'stats': {
-                'total_games': len(raw_games),
-                'approved_games': len(processed_games),
+                'api_games': len(raw_games),
+                'legacy_games': len(legacy_games),
+                'total_games': len(processed_games),
                 'total_exclusions': len(new_exclusions),
                 'new_exclusions': len(new_exclusions) - len(existing_exclusions)
             }
