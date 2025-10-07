@@ -58,29 +58,78 @@ def upload_to_s3(local_path, bucket_name, s3_key):
         print(f"Error uploading to S3: {e}")
         return False
 
-def get_current_version_from_apkcombo():
-    """Get the current Roblox version from APKCombo."""
+def validate_roblox_version(version):
+    """
+    Validate that the version is in the correct Roblox format: 2.xxx.xxx
+    Returns True if valid, False otherwise.
+    """
+    if not version:
+        return False
+    
+    parts = version.split('.')
+    if len(parts) != 3:
+        return False
+    
+    # First part must be "2"
+    if parts[0] != '2':
+        return False
+    
+    # All parts should be numeric
     try:
-        print("Checking current Roblox version on APKCombo...")
-        result = subprocess.run(
-            ['python', '/app/download_roblox.py', '--check-only', '--output-dir', '/tmp'],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        # Parse version from output
-        for line in result.stdout.split('\n'):
-            if 'Found version from page:' in line:
-                version = line.split('Found version from page:')[1].strip()
-                print(f"Current APKCombo version: {version}")
-                return version
-        
-        print("Could not determine version from APKCombo")
-        return None
-    except Exception as e:
-        print(f"Error checking version: {e}")
-        return None
+        for part in parts:
+            int(part)
+        return True
+    except ValueError:
+        return False
+
+def get_current_version_from_apkcombo():
+    """
+    Get the current Roblox version from APKCombo.
+    Validates format and retries if invalid.
+    """
+    max_attempts = 3
+    retry_delay = 180  # 3 minutes
+    
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                print(f"Waiting {retry_delay} seconds before retry {attempt + 1}/{max_attempts}...")
+                import time
+                time.sleep(retry_delay)
+            
+            print(f"Checking current Roblox version on APKCombo (attempt {attempt + 1}/{max_attempts})...")
+            result = subprocess.run(
+                ['python', '/app/download_roblox.py', '--check-only', '--output-dir', '/tmp'],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            # Parse version from output
+            for line in result.stdout.split('\n'):
+                if 'Found version from page:' in line:
+                    version = line.split('Found version from page:')[1].strip()
+                    print(f"Detected version: {version}")
+                    
+                    # Validate version format
+                    if validate_roblox_version(version):
+                        print(f"✓ Version format is valid (2.xxx.xxx): {version}")
+                        return version
+                    else:
+                        print(f"✗ Invalid version format: {version} (expected 2.xxx.xxx)")
+                        if attempt < max_attempts - 1:
+                            print(f"Will retry after {retry_delay} seconds...")
+                            continue
+                        else:
+                            print(f"Failed to get valid version after {max_attempts} attempts")
+                            return None
+            
+            print(f"Could not parse version from APKCombo output")
+            
+        except Exception as e:
+            print(f"Error checking version: {e}")
+    
+    return None
 
 def version_exists_in_s3(bucket_name, s3_prefix, version):
     """Check if a specific version already exists in S3."""
@@ -153,10 +202,35 @@ def main():
         current_apkcombo_version = get_current_version_from_apkcombo()
         
         if not current_apkcombo_version:
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Could not determine current version from APKCombo'})
+            print("⚠️  Could not determine valid version from APKCombo")
+            print("⚠️  Skipping APK download but will proceed with gameservers update")
+            
+            result = {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'APK version detection failed, skipped download',
+                    'apk_skipped': True
+                })
             }
+            
+            # Still update gameservers even though APK failed
+            if update_games and action in ['all', 'gameservers']:
+                print("\n" + "=" * 60)
+                print("UPDATING GAMESERVERS (APK detection failed)")
+                print("=" * 60)
+                
+                gameservers_result = update_gameservers(
+                    bucket_name=bucket_name,
+                    s3_prefix=""  # Store in root of bucket under gameservers/
+                )
+                
+                # Merge results
+                result_body = json.loads(result['body'])
+                gameservers_body = json.loads(gameservers_result['body'])
+                result_body['gameservers'] = gameservers_body
+                result['body'] = json.dumps(result_body)
+            
+            return result
         
         # Check if this version already exists in S3
         if version_exists_in_s3(bucket_name, s3_prefix, current_apkcombo_version) and not force:
