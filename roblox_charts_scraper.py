@@ -85,7 +85,7 @@ def fetch_game_details_v2(universe_id):
     url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
     
     max_retries = 3
-    base_delay = 5  # Base delay for rate limiting (5 seconds)
+    base_delay = 1.5  # Base delay for rate limiting (1.5 seconds)
     
     for attempt in range(max_retries):
         try:
@@ -586,7 +586,7 @@ class RobloxChartsScraper:
                 
                 # Fetch detailed game info with retry
                 max_retries = 2
-                retry_delay = 5  # seconds
+                retry_delay = 1.5  # seconds
                 
                 for attempt in range(max_retries):
                     try:
