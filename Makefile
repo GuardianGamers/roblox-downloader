@@ -25,7 +25,7 @@ help:
 	@echo "  make build [STAGE=dev|test|prod]       - Build Docker image"
 	@echo "  make push [STAGE=dev|test|prod]        - Push image to ECR"
 	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy full stack to AWS (build+push+deploy)"
-	@echo "  make deploy-only [STAGE=dev|test|prod] - Deploy CloudFormation only (no Docker rebuild)"
+	@echo "  make deploy-sam [STAGE=dev|test|prod]  - Deploy CloudFormation only (no Docker rebuild)"
 	@echo "  make delete [STAGE=dev|test|prod]      - Delete stack from AWS"
 	@echo "  make logs [STAGE=dev|test|prod]        - Tail ECS task logs"
 	@echo "  make run-task [STAGE=dev|test|prod]    - Manually run ECS task"
@@ -166,8 +166,8 @@ deploy: push
 		--tags Stage=$(STAGE) Project=roblox-downloader
 	@echo "Deployment complete!"
 
-.PHONY: deploy-only
-deploy-only:
+.PHONY: deploy-sam
+deploy-sam:
 	@echo "Deploying CloudFormation stack WITHOUT rebuilding Docker image (STAGE=$(STAGE))..."
 	@echo "Using existing ECR image: $(ECR_IMAGE):latest"
 	aws cloudformation deploy \
