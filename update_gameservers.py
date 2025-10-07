@@ -377,7 +377,7 @@ def create_gameservers_zip(games: List[Dict], output_path: Path) -> None:
 def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_path: str) -> None:
     """
     Create a metadata.zip file for public consumption with:
-    - gameservers.json (cleaned up - without orig_description, ai_flags, ai_reasoning)
+    - gameservers.json (cleaned up - without internal fields like serverFiles, orig_description, etc.)
     - gamecategories.json
     
     Args:
@@ -391,7 +391,7 @@ def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_pat
     cleaned_games = []
     for game in games:
         cleaned_game = {k: v for k, v in game.items() 
-                       if k not in ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization']}
+                       if k not in ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization', 'serverFiles']}
         cleaned_games.append(cleaned_game)
     
     with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
