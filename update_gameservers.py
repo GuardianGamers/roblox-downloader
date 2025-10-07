@@ -204,6 +204,10 @@ def update_legacy_games(legacy_games: List[Dict]) -> List[Dict]:
             
             log(f"  [{i+1}/{len(legacy_games)}] Updating legacy game: {game_name}")
             
+            # Ensure access attribute exists (for older gameservers.json files)
+            if 'access' not in game:
+                game['access'] = 'public'
+            
             if not universe_id:
                 log(f"    ⚠️  No universe_id, keeping old data")
                 updated_games.append(game)
@@ -578,6 +582,9 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
                         for game in old_games:
                             place_id = str(game.get('place_id', ''))
                             if place_id:
+                                # Ensure access attribute exists (for older gameservers.json files)
+                                if 'access' not in game:
+                                    game['access'] = 'public'
                                 existing_games[place_id] = game
                     log(f"Loaded {len(existing_games)} existing games")
         else:
@@ -599,6 +606,9 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
                     for game in old_games:
                         place_id = str(game.get('place_id', ''))
                         if place_id:
+                            # Ensure access attribute exists (for older gameservers.json files)
+                            if 'access' not in game:
+                                game['access'] = 'public'
                             existing_games[place_id] = game
                     log(f"Loaded {len(existing_games)} existing games from S3")
     except Exception as e:

@@ -795,6 +795,7 @@ class RobloxChartsScraper:
             "game": "roblox",
             "version": "latest",
             "stages": ["dev", "test", "prod"],  # Include all stages
+            "access": "public",
             "universe_id": universe_id,
             "place_id": place_id,
             "player_count": playing_count,
@@ -868,6 +869,7 @@ class RobloxChartsScraper:
             "game": "roblox",
             "version": "latest",
             "stages": ["dev", "test", "prod"],  # Include all stages
+            "access": "public",
             "universe_id": universe_id,
             "place_id": place_id,
             "player_count": playing_count,
