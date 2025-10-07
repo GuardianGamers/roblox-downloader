@@ -8,6 +8,7 @@ import os
 import sys
 import json
 from datetime import datetime
+from pathlib import Path
 
 # Set up local testing environment
 os.environ['BUCKET_NAME'] = os.environ.get('TEST_BUCKET_NAME', 'test-roblox-local')
@@ -23,16 +24,45 @@ from update_gameservers import (
     log
 )
 
-def test_chart_scraper(pages=1):
+def test_chart_scraper(pages=1, local_dir='./test_gameservers'):
     """Test 1: Fetch games from Roblox charts."""
     print("\n" + "="*60)
     print("TEST 1: Fetching games from Roblox charts")
     print("="*60)
     
+    # Check if we already have today's gameservers.json
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    today_dir = Path(local_dir) / today
+    gameservers_file = today_dir / 'gameservers.json'
+    
+    if gameservers_file.exists():
+        print(f"📦 Loading existing games from {gameservers_file}")
+        try:
+            with open(gameservers_file, 'r') as f:
+                games = json.load(f)
+            print(f"✅ Loaded {len(games)} games from today's gameservers.json")
+            print(f"\nSample game:")
+            if games:
+                sample = games[0]
+                print(f"  Name: {sample.get('name', 'N/A')}")
+                print(f"  Place ID: {sample.get('place_id', 'N/A')}")
+            return games[:5]  # Return first 5 for AI testing
+        except Exception as e:
+            print(f"⚠️  Failed to load gameservers.json: {e}, fetching fresh...")
+    
+    # Fetch fresh games
+    print(f"ℹ️  No gameservers.json found for {today}, fetching fresh...")
     games = fetch_latest_roblox_games(pages_per_category=pages)
     
     if games:
         print(f"✅ Successfully fetched {len(games)} games")
+        
+        # Save to today's gameservers.json
+        today_dir.mkdir(parents=True, exist_ok=True)
+        with open(gameservers_file, 'w') as f:
+            json.dump(games, f, indent=2)
+        print(f"💾 Saved games to: {gameservers_file}")
+        
         print(f"\nSample game:")
         sample = games[0]
         print(f"  Name: {sample.get('name', 'N/A')}")
@@ -162,12 +192,25 @@ def main():
     games = []
     
     if args.test in ['scraper', 'all']:
-        games = test_chart_scraper(pages=args.pages)
+        games = test_chart_scraper(pages=args.pages, local_dir=args.local_dir)
     
     if args.test in ['ai', 'all']:
         if not games:
-            print("\n⚠️  Fetching sample games for AI test...")
-            games = fetch_latest_roblox_games(pages_per_category=1)
+            # Try to load from today's gameservers.json first
+            today = datetime.utcnow().strftime('%Y-%m-%d')
+            gameservers_file = Path(args.local_dir) / today / 'gameservers.json'
+            
+            if gameservers_file.exists():
+                print(f"\n📦 Loading games from {gameservers_file} for AI test...")
+                try:
+                    with open(gameservers_file, 'r') as f:
+                        games = json.load(f)[:5]  # First 5 for AI testing
+                except Exception as e:
+                    print(f"⚠️  Failed to load gameservers.json: {e}, fetching fresh...")
+                    games = fetch_latest_roblox_games(pages_per_category=1)
+            else:
+                print(f"\n⚠️  No gameservers.json found for {today}, fetching sample games for AI test...")
+                games = fetch_latest_roblox_games(pages_per_category=1)
         test_ai_moderation(games)
     
     if args.test in ['s3', 'all'] and use_s3:

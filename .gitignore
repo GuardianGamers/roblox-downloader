@@ -48,3 +48,6 @@ Thumbs.db
 samconfig.toml.bak
 response.json
 
+# Local testing cache
+test_gameservers/.cache_games.json
+
