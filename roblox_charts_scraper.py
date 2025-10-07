@@ -85,7 +85,7 @@ def fetch_game_details_v2(universe_id):
     url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
     
     max_retries = 3
-    base_delay = 5  # Base delay for rate limiting (5 seconds)
+    base_delay = 1.5  # Base delay for rate limiting (1.5 seconds)
     
     for attempt in range(max_retries):
         try:
@@ -1131,7 +1131,7 @@ def main():
         print(f"🚫 From file: {len(file_blacklist)}")
     
     # Initialize scraper
-    scraper = RobloxChartsScraper(rate_limit_delay=5)  # Rate limiting to prevent 429 errors
+    scraper = RobloxChartsScraper(rate_limit_delay=1.5)  # Rate limiting delay between requests
     
     # Use basic pagination with category merging
     games = scraper.fetch_all_games(max_pages=args.max_pages, blacklist=combined_blacklist)
