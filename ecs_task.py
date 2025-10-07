@@ -505,7 +505,7 @@ def main():
                 'statusCode': 200,
                 'body': json.dumps({
                     'action': 'check',
-                    'current_version': current_version,
+                    'current_version': current_apkcombo_version,
                     'output': result.stdout
                 })
             }
@@ -519,7 +519,7 @@ def main():
                 'statusCode': 200,
                 'body': json.dumps({
                     'message': 'No new version available',
-                    'current_version': current_version
+                    'current_version': current_apkcombo_version
                 })
             }
         
@@ -569,7 +569,7 @@ def main():
             'body': json.dumps({
                 'message': 'Download successful',
                 'version': new_version,
-                'previous_version': current_version,
+                'previous_version': current_apkcombo_version,
                 'bucket': bucket_name,
                 'uploaded_files': uploaded_files,
                 's3_url': f"s3://{bucket_name}/{s3_key}"
