@@ -584,20 +584,41 @@ class RobloxChartsScraper:
             try:
                 print(f"  [{i}/{total}] 📝 Fetching details: {game_name}")
                 
-                # Fetch detailed game info
-                game_details = fetch_game_details_v2(universe_id)
-                if game_details:
-                    description = game_details.get('description', '').replace('\r\n', '\n').replace('\r', '\n').strip()
-                    if description:
-                        game['_enriched_description'] = description
+                # Fetch detailed game info with retry
+                max_retries = 2
+                retry_delay = 5  # seconds
                 
-                # Fetch thumbnail
-                thumbnail_data = fetch_game_thumbnail(universe_id, place_id)
-                if thumbnail_data and 'data' in thumbnail_data and thumbnail_data['data']:
-                    for item in thumbnail_data['data']:
-                        if item.get('state') == 'Completed' and item.get('imageUrl'):
-                            game['_enriched_thumbnail'] = item['imageUrl']
-                            break
+                for attempt in range(max_retries):
+                    try:
+                        game_details = fetch_game_details_v2(universe_id)
+                        if game_details:
+                            description = game_details.get('description', '').replace('\r\n', '\n').replace('\r', '\n').strip()
+                            if description:
+                                game['_enriched_description'] = description
+                        break  # Success, exit retry loop
+                    except Exception as detail_error:
+                        if attempt < max_retries - 1:
+                            print(f"    ⚠️  Connection error, waiting {retry_delay}s before retry...")
+                            time.sleep(retry_delay)
+                        else:
+                            print(f"    ❌ Failed after {max_retries} attempts: {detail_error}")
+                
+                # Fetch thumbnail with retry
+                for attempt in range(max_retries):
+                    try:
+                        thumbnail_data = fetch_game_thumbnail(universe_id, place_id)
+                        if thumbnail_data and 'data' in thumbnail_data and thumbnail_data['data']:
+                            for item in thumbnail_data['data']:
+                                if item.get('state') == 'Completed' and item.get('imageUrl'):
+                                    game['_enriched_thumbnail'] = item['imageUrl']
+                                    break
+                        break  # Success, exit retry loop
+                    except Exception as thumb_error:
+                        if attempt < max_retries - 1:
+                            print(f"    ⚠️  Connection error, waiting {retry_delay}s before retry...")
+                            time.sleep(retry_delay)
+                        else:
+                            print(f"    ❌ Failed after {max_retries} attempts: {thumb_error}")
                 
                 # Progress updates every 10 games
                 if i % 10 == 0:
