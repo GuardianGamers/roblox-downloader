@@ -19,9 +19,11 @@ import boto3
 import subprocess
 import zipfile
 import tempfile
+import requests
 from datetime import datetime
 from typing import Dict, List, Set, Optional
 from pathlib import Path
+from io import BytesIO
 
 # AWS clients
 s3_client = boto3.client('s3')
@@ -346,6 +348,57 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
         log(f"Error loading exclusion list: {e}")
         return {}
 
+def download_and_convert_image(img_url: str, max_size_kb: int = 100) -> Optional[bytes]:
+    """
+    Download an image from URL and convert it to WebP format with size limit.
+    
+    Args:
+        img_url: URL of the image to download
+        max_size_kb: Maximum size in KB (default 100KB)
+    
+    Returns:
+        WebP image bytes or None if failed
+    """
+    try:
+        from PIL import Image
+        
+        # Download image
+        response = requests.get(img_url, timeout=10)
+        response.raise_for_status()
+        
+        # Open image
+        img = Image.open(BytesIO(response.content))
+        
+        # Convert to RGB if necessary (WebP doesn't support all modes)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            # Create white background
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Try different quality settings to get under max_size_kb
+        quality = 90
+        while quality > 10:
+            output = BytesIO()
+            img.save(output, format='WEBP', quality=quality)
+            size_kb = len(output.getvalue()) / 1024
+            
+            if size_kb <= max_size_kb:
+                return output.getvalue()
+            
+            quality -= 10
+        
+        # If still too large, return what we have
+        return output.getvalue()
+        
+    except Exception as e:
+        log(f"    ⚠️  Failed to download/convert image: {e}")
+        return None
+
 def create_gameservers_zip(games: List[Dict], output_path: Path) -> None:
     """
     Create a zip file with gameservers data structured as:
@@ -376,24 +429,28 @@ def create_gameservers_zip(games: List[Dict], output_path: Path) -> None:
     
     log(f"Gameservers.zip created successfully: {output_path}")
 
-def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_path: str) -> None:
+def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_path: str, use_local_images: bool = False) -> None:
     """
     Create a metadata.zip file for public consumption with:
     - gameservers.json (cleaned up - without internal fields like serverFiles, orig_description, etc.)
     - gamecategories.json
+    - Optionally: local WebP images (if use_local_images=True)
     
     Args:
         games: List of game data
         output_path: Path where the zip file should be created
         gamecategories_path: Path to gamecategories.json file
+        use_local_images: If True, download images and store them in the zip
     """
-    log(f"Creating metadata.zip for public distribution...")
+    log(f"Creating metadata.zip for public distribution (local_images={use_local_images})...")
     
     # Clean up games data by removing internal fields
     # Important: Ensure 'access' appears early in JSON for client parsing
     excluded_fields = ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization', 'serverFiles']
     
     cleaned_games = []
+    downloaded_images = {}  # Store downloaded image data: {game_id: webp_bytes}
+    
     for game in games:
         # Create new dict with 'access' first, then other fields in order
         cleaned_game = {}
@@ -406,6 +463,21 @@ def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_pat
         for k, v in game.items():
             if k not in excluded_fields and k != 'access':  # Skip 'access' since we already added it
                 cleaned_game[k] = v
+        
+        # Download and convert image if requested
+        if use_local_images and cleaned_game.get('img'):
+            game_id = cleaned_game.get('id', f"roblox{cleaned_game.get('place_id', 'unknown')}")
+            log(f"  Downloading image for {game_id}...")
+            
+            webp_data = download_and_convert_image(cleaned_game['img'], max_size_kb=100)
+            if webp_data:
+                downloaded_images[game_id] = webp_data
+                # Update img path to local path
+                cleaned_game['img'] = f"/metadata/{game_id}.webp"
+                size_kb = len(webp_data) / 1024
+                log(f"    ✓ Converted to WebP ({size_kb:.1f}KB)")
+            else:
+                log(f"    ✗ Failed, keeping original URL")
         
         cleaned_games.append(cleaned_game)
     
@@ -424,8 +496,16 @@ def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_pat
             log(f"  Added gamecategories.json")
         else:
             log(f"  Warning: gamecategories.json not found at {gamecategories_path}")
+        
+        # Add downloaded images
+        if downloaded_images:
+            log(f"  Adding {len(downloaded_images)} WebP images...")
+            for game_id, webp_data in downloaded_images.items():
+                zipf.writestr(f"metadata/{game_id}.webp", webp_data)
+            log(f"  ✓ Added {len(downloaded_images)} images to metadata/ directory")
     
-    log(f"Metadata.zip created successfully: {output_path}")
+    total_size_mb = output_path.stat().st_size / (1024 * 1024)
+    log(f"Metadata.zip created successfully: {output_path} ({total_size_mb:.2f}MB)")
 
 def save_gameservers_to_s3(
     games: List[Dict],
@@ -433,7 +513,8 @@ def save_gameservers_to_s3(
     bucket_name: str,
     s3_prefix: str,
     local_dir: str = None,
-    gamecategories_path: str = None
+    gamecategories_path: str = None,
+    use_local_images: bool = False
 ) -> str:
     """
     Save updated gameservers.json and exclusions to S3 or local directory with today's date.
@@ -446,6 +527,7 @@ def save_gameservers_to_s3(
         s3_prefix: S3 prefix for gameservers data
         local_dir: Optional local directory path for testing (overrides S3)
         gamecategories_path: Path to gamecategories.json file (defaults to ./gamecategories.json)
+        use_local_images: If True, download and embed images as WebP in metadata.zip
         
     Returns:
         Path where data was saved
@@ -493,7 +575,7 @@ def save_gameservers_to_s3(
         
         # Create metadata.zip
         metadata_zip_path = daily_dir / "metadata.zip"
-        create_metadata_zip(games, metadata_zip_path, gamecategories_path)
+        create_metadata_zip(games, metadata_zip_path, gamecategories_path, use_local_images)
         
         log(f"Saved {len(games)} games and {len(exclusions)} exclusions locally")
         return str(daily_dir)
@@ -548,7 +630,7 @@ def save_gameservers_to_s3(
         tmp_metadata_path = Path(tmp_metadata.name)
     
     try:
-        create_metadata_zip(games, tmp_metadata_path, gamecategories_path)
+        create_metadata_zip(games, tmp_metadata_path, gamecategories_path, use_local_images)
         
         # Upload to S3
         with open(tmp_metadata_path, 'rb') as f:
@@ -568,7 +650,7 @@ def save_gameservers_to_s3(
     log(f"Saved {len(games)} games and {len(exclusions)} exclusions")
     return daily_prefix
 
-def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_dir: str = None) -> Dict:
+def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_dir: str = None, use_local_images: bool = None) -> Dict:
     """
     Main function to update gameservers data.
     
@@ -576,12 +658,17 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix
         local_dir: Optional local directory for testing (overrides S3)
+        use_local_images: If True, download and embed images as WebP. If None, reads from env var USE_LOCAL_IMAGES
         
     Returns:
         Dict with status and statistics
     """
+    # Read from environment variable if not explicitly set
+    if use_local_images is None:
+        use_local_images = os.environ.get('USE_LOCAL_IMAGES', 'false').lower() == 'true'
+    
     log("=" * 60)
-    log("Starting gameservers update")
+    log(f"Starting gameservers update (local_images={use_local_images})")
     log("=" * 60)
     
     # Load existing exclusion list
@@ -770,7 +857,8 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         bucket_name, 
         s3_prefix, 
         local_dir=local_dir,
-        gamecategories_path=default_gamecategories_path
+        gamecategories_path=default_gamecategories_path,
+        use_local_images=use_local_images
     )
     
     log("=" * 60)
