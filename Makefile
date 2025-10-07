@@ -24,7 +24,8 @@ help:
 	@echo "  make validate                           - Validate CloudFormation template"
 	@echo "  make build [STAGE=dev|test|prod]       - Build Docker image"
 	@echo "  make push [STAGE=dev|test|prod]        - Push image to ECR"
-	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy full stack to AWS"
+	@echo "  make deploy [STAGE=dev|test|prod]      - Deploy full stack to AWS (build+push+deploy)"
+	@echo "  make deploy-only [STAGE=dev|test|prod] - Deploy CloudFormation only (no Docker rebuild)"
 	@echo "  make delete [STAGE=dev|test|prod]      - Delete stack from AWS"
 	@echo "  make logs [STAGE=dev|test|prod]        - Tail ECS task logs"
 	@echo "  make run-task [STAGE=dev|test|prod]    - Manually run ECS task"
@@ -157,6 +158,18 @@ push: build
 deploy: push
 	@echo "Deploying CloudFormation stack (STAGE=$(STAGE))..."
 	@echo "Docker image already pushed to: $(ECR_IMAGE):latest"
+	aws cloudformation deploy \
+		--template-file template.yaml \
+		--stack-name $(STACK_NAME) \
+		--parameter-overrides Stage=$(STAGE) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--tags Stage=$(STAGE) Project=roblox-downloader
+	@echo "Deployment complete!"
+
+.PHONY: deploy-only
+deploy-only:
+	@echo "Deploying CloudFormation stack WITHOUT rebuilding Docker image (STAGE=$(STAGE))..."
+	@echo "Using existing ECR image: $(ECR_IMAGE):latest"
 	aws cloudformation deploy \
 		--template-file template.yaml \
 		--stack-name $(STACK_NAME) \
