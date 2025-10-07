@@ -85,7 +85,7 @@ def fetch_game_details_v2(universe_id):
     url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
     
     max_retries = 3
-    base_delay = .2  # Base delay for rate limiting
+    base_delay = 5  # Base delay for rate limiting (5 seconds)
     
     for attempt in range(max_retries):
         try:
@@ -103,8 +103,8 @@ def fetch_game_details_v2(universe_id):
                     return None
                     
             elif response.status_code == 429:
-                # Rate limited - retry with exponential backoff
-                retry_delay = base_delay * (2 ** attempt)
+                # Rate limited - wait 5 seconds and retry
+                retry_delay = base_delay
                 print(f"        ⏳ Rate limited! Waiting {retry_delay:.1f}s before retry {attempt + 1}/{max_retries}")
                 time.sleep(retry_delay)
                 continue
