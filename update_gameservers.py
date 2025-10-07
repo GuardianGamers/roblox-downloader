@@ -399,6 +399,8 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     processed_games = []
     new_exclusions = dict(existing_exclusions)  # Copy existing exclusions
     processed_place_ids = set()  # Track which games we've processed from API
+    ai_calls_made = 0  # Track how many AI calls we made
+    ai_calls_saved = 0  # Track how many we skipped by reusing
     
     for i, game in enumerate(raw_games):
         log(f"Processing game {i+1}/{len(raw_games)}: {game.get('name', 'Unknown')}")
@@ -411,14 +413,33 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
             log(f"  Skipping {place_id} (already excluded)")
             continue
         
-        # AI review
+        # Get current description from API
+        current_description = game.get('description', '')
+        
+        # Check if we can reuse existing sanitized description
+        existing_game = existing_games.get(place_id)
+        if existing_game and existing_game.get('orig_description') == current_description:
+            # Description unchanged - reuse existing sanitized version
+            log(f"  Description unchanged, reusing sanitized version (skipping AI)")
+            game['description'] = existing_game.get('description', current_description)
+            game['orig_description'] = current_description
+            game['ai_flags'] = existing_game.get('ai_flags', [])
+            game['ai_reasoning'] = existing_game.get('ai_reasoning', '')
+            processed_games.append(game)
+            ai_calls_saved += 1
+            continue
+        
+        # Description is new or changed - run AI sanitization
+        log(f"  New/changed description, running AI sanitization...")
         ai_result = sanitize_description_with_ai(
-            game.get('description', ''),
+            current_description,
             game.get('name', 'Unknown')
         )
+        ai_calls_made += 1
         
-        # Update game with sanitized description
+        # Update game with sanitized description and save original
         game['description'] = ai_result['sanitized_description']
+        game['orig_description'] = current_description  # Save original for future comparison
         game['ai_flags'] = ai_result.get('flags', [])
         game['ai_reasoning'] = ai_result.get('reasoning', '')
         
@@ -457,6 +478,8 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     log(f"  Legacy Games: {len(legacy_games)}")
     log(f"  Total Games: {len(processed_games)}")
     log(f"  Excluded: {len(new_exclusions)} total ({len(new_exclusions) - len(existing_exclusions)} new)")
+    log(f"  AI Calls Made: {ai_calls_made}")
+    log(f"  AI Calls Saved: {ai_calls_saved} (reused existing sanitization)")
     if local_dir:
         log(f"  Local path: {save_path}")
     else:
@@ -473,7 +496,9 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
                 'legacy_games': len(legacy_games),
                 'total_games': len(processed_games),
                 'total_exclusions': len(new_exclusions),
-                'new_exclusions': len(new_exclusions) - len(existing_exclusions)
+                'new_exclusions': len(new_exclusions) - len(existing_exclusions),
+                'ai_calls_made': ai_calls_made,
+                'ai_calls_saved': ai_calls_saved
             }
         })
     }
