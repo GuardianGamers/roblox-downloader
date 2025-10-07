@@ -165,7 +165,7 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource:
-                  - !Sub "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
       Tags:
         - Key: Environment
           Value: !Ref Stage
