@@ -74,23 +74,27 @@ def test_chart_scraper(pages=1, local_dir='./test_gameservers'):
         print("❌ Failed to fetch games")
         return []
 
-def test_ai_moderation(games):
-    """Test 2: Test AI moderation on all games."""
+def test_ai_moderation(games, max_games=50):
+    """Test 2: Test AI moderation on sample games."""
     print("\n" + "="*60)
-    print("TEST 2: Testing AI moderation on ALL games")
+    print(f"TEST 2: Testing AI moderation (first {max_games} games)")
     print("="*60)
     
     if not games:
         print("⚠️  No games to test")
         return
     
-    total = len(games)
+    # Limit to first N games
+    games_to_test = games[:max_games]
+    total = len(games_to_test)
+    print(f"Testing {total} out of {len(games)} total games\n")
     excluded_count = 0
     modified_count = 0
     unchanged_count = 0
     error_count = 0
+    excluded_games = []  # Track excluded games with reasons
     
-    for i, game in enumerate(games, 1):
+    for i, game in enumerate(games_to_test, 1):
         game_name = game.get('name', 'Unknown')
         original_desc = game.get('description', '')
         
@@ -105,9 +109,22 @@ def test_ai_moderation(games):
             
             # Check if excluded
             if not is_appropriate:
+                # Determine primary reason from flags
+                reason = flags[0] if flags else 'inappropriate'
+                # Normalize to single words with hyphens
+                reason = reason.lower().replace(' ', '-').replace('_', '-')
+                
                 print(f"  ❌ EXCLUDED - Not appropriate for <13")
                 print(f"  🚩 Flags: {', '.join(flags)}")
-                print(f"  📝 Reasoning: {result.get('reasoning', 'N/A')}")
+                print(f"  📝 Reason: {reason}")
+                print(f"  💬 Reasoning: {result.get('reasoning', 'N/A')}")
+                
+                excluded_games.append({
+                    'name': game_name,
+                    'place_id': game.get('place_id'),
+                    'reason': reason,
+                    'flags': flags
+                })
                 excluded_count += 1
             # Check if description was modified
             elif original_desc.strip() != sanitized_desc.strip():
@@ -137,11 +154,22 @@ def test_ai_moderation(games):
     print(f"\n" + "="*60)
     print(f"AI MODERATION SUMMARY")
     print("="*60)
-    print(f"Total games: {total}")
+    print(f"Total games tested: {total}")
     print(f"  ✅ Unchanged: {unchanged_count}")
     print(f"  ✏️  Modified: {modified_count}")
     print(f"  ❌ Excluded: {excluded_count}")
     print(f"  ⚠️  Errors: {error_count}")
+    
+    if excluded_games:
+        print(f"\n📋 EXCLUSION LIST:")
+        print("="*60)
+        for game in excluded_games:
+            print(f"  • {game['name']}")
+            print(f"    Place ID: {game['place_id']}")
+            print(f"    Reason: {game['reason']}")
+            print(f"    Flags: {', '.join(game['flags'])}")
+            print()
+    
     print("="*60)
 
 def test_s3_operations(use_s3=True):

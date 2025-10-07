@@ -157,7 +157,7 @@ Respond ONLY with valid JSON in this exact format:
             "reasoning": f"AI analysis failed: {str(e)}"
         }
 
-def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None) -> Set[str]:
+def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None) -> Dict[str, Dict]:
     """
     Load exclusion list of place IDs from S3 or local directory (most recent version).
     
@@ -167,7 +167,7 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
         local_dir: Optional local directory path for testing (overrides S3)
         
     Returns:
-        Set of excluded place IDs
+        Dict mapping place_id -> {reason, timestamp}
     """
     # Use local directory if specified (for testing)
     if local_dir:
@@ -175,30 +175,37 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
             gameservers_dir = Path(local_dir)
             if not gameservers_dir.exists():
                 log(f"Local directory not found: {local_dir}")
-                return set()
+                return {}
             
             # Find most recent date directory
             date_dirs = sorted([d for d in gameservers_dir.iterdir() if d.is_dir()], reverse=True)
             if not date_dirs:
                 log("No previous gameservers data found in local directory")
-                return set()
+                return {}
             
             latest_dir = date_dirs[0]
             exclusion_file = latest_dir / "exclusions.json"
             
             if not exclusion_file.exists():
                 log(f"No exclusions file found in {latest_dir}")
-                return set()
+                return {}
             
             log(f"Loading exclusion list from {exclusion_file}")
             with open(exclusion_file, 'r') as f:
                 exclusions_data = json.load(f)
             
-            return set(exclusions_data.get('excluded_place_ids', []))
+            # Handle both old format (list) and new format (dict)
+            exclusions = exclusions_data.get('exclusions', {})
+            if not exclusions:
+                # Fallback to old format - convert list to dict
+                old_list = exclusions_data.get('excluded_place_ids', [])
+                exclusions = {place_id: {'reason': 'unknown', 'timestamp': exclusions_data.get('last_updated')} for place_id in old_list}
+            
+            return exclusions
             
         except Exception as e:
             log(f"Error loading local exclusion list: {e}")
-            return set()
+            return {}
     
     # Use S3 for production
     try:
@@ -211,12 +218,12 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
         
         if 'CommonPrefixes' not in response:
             log("No previous gameservers data found")
-            return set()
+            return {}
         
         # Get most recent directory
         directories = sorted([p['Prefix'] for p in response['CommonPrefixes']], reverse=True)
         if not directories:
-            return set()
+            return {}
         
         latest_dir = directories[0]
         exclusion_file = f"{latest_dir}exclusions.json"
@@ -225,18 +232,25 @@ def load_exclusion_list(bucket_name: str, s3_prefix: str, local_dir: str = None)
         response = s3_client.get_object(Bucket=bucket_name, Key=exclusion_file)
         exclusions_data = json.loads(response['Body'].read())
         
-        return set(exclusions_data.get('excluded_place_ids', []))
+        # Handle both old format (list) and new format (dict)
+        exclusions = exclusions_data.get('exclusions', {})
+        if not exclusions:
+            # Fallback to old format - convert list to dict
+            old_list = exclusions_data.get('excluded_place_ids', [])
+            exclusions = {place_id: {'reason': 'unknown', 'timestamp': exclusions_data.get('last_updated')} for place_id in old_list}
+        
+        return exclusions
         
     except s3_client.exceptions.NoSuchKey:
         log("No previous exclusion list found, starting fresh")
-        return set()
+        return {}
     except Exception as e:
         log(f"Error loading exclusion list: {e}")
-        return set()
+        return {}
 
 def save_gameservers_to_s3(
     games: List[Dict],
-    exclusions: Set[str],
+    exclusions: Dict[str, Dict],
     bucket_name: str,
     s3_prefix: str,
     local_dir: str = None
@@ -246,7 +260,7 @@ def save_gameservers_to_s3(
     
     Args:
         games: List of game data
-        exclusions: Set of excluded place IDs
+        exclusions: Dict mapping place_id -> {reason, timestamp}
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix for gameservers data
         local_dir: Optional local directory path for testing (overrides S3)
@@ -258,7 +272,8 @@ def save_gameservers_to_s3(
     
     gameservers_data = json.dumps(games, indent=2)
     exclusions_data = json.dumps({
-        "excluded_place_ids": list(exclusions),
+        "exclusions": exclusions,
+        "excluded_place_ids": list(exclusions.keys()),  # Keep for backward compatibility
         "last_updated": datetime.utcnow().isoformat(),
         "count": len(exclusions)
     }, indent=2)
@@ -339,7 +354,7 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
     
     # Process each game with AI
     processed_games = []
-    new_exclusions = set(existing_exclusions)
+    new_exclusions = dict(existing_exclusions)  # Copy existing exclusions
     
     for i, game in enumerate(raw_games):
         log(f"Processing game {i+1}/{len(raw_games)}: {game.get('name', 'Unknown')}")
@@ -364,8 +379,17 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         
         # Add to exclusions if not appropriate
         if not ai_result['is_appropriate_for_under13']:
-            log(f"  Excluding {place_id}: {ai_result['reasoning']}")
-            new_exclusions.add(place_id)
+            flags = ai_result.get('flags', [])
+            # Determine primary reason from first flag
+            reason = flags[0].lower().replace(' ', '-').replace('_', '-') if flags else 'inappropriate'
+            
+            log(f"  Excluding {place_id} (reason: {reason}): {ai_result['reasoning']}")
+            new_exclusions[place_id] = {
+                'reason': reason,
+                'timestamp': datetime.utcnow().isoformat(),
+                'flags': flags,
+                'reasoning': ai_result.get('reasoning', '')
+            }
         else:
             processed_games.append(game)
     
