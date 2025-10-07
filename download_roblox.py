@@ -18,10 +18,16 @@ def log(message):
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     print(f"[{timestamp} UTC] {message}")
 
-def get_current_version(url: str) -> Optional[str]:
+def get_current_version(url: str, output_dir: Optional[str] = None) -> Optional[str]:
     """
     Get the current Roblox version from APKCombo page.
-    Returns version string like "2.692.843" or None if not found.
+    
+    Args:
+        url: APKCombo URL to check
+        output_dir: Optional directory to save debug files (screenshots, HTML) on error
+    
+    Returns:
+        Version string like "2.692.843" or None if not found.
     """
     log("Checking current Roblox version on APKCombo...")
     
@@ -77,11 +83,45 @@ def get_current_version(url: str) -> Optional[str]:
                 log(f"Found version from page: {version}")
                 return version
             
+            # Could not find version - save debug files if output_dir provided
             log("Could not find version number on page")
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+                log("Saving debug files for troubleshooting...")
+                
+                # Save screenshot
+                screenshot_path = os.path.join(output_dir, 'version_check_screenshot.png')
+                page.screenshot(path=screenshot_path, full_page=True)
+                log(f"Screenshot saved to: {screenshot_path}")
+                
+                # Save page HTML
+                html_path = os.path.join(output_dir, 'version_check_page.html')
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                log(f"Page HTML saved to: {html_path}")
+            
             return None
             
         except Exception as e:
             log(f"Error getting version: {str(e)}")
+            
+            # Save debug files on exception if output_dir provided
+            if output_dir:
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    log("Saving debug files after error...")
+                    
+                    screenshot_path = os.path.join(output_dir, 'version_check_error_screenshot.png')
+                    page.screenshot(path=screenshot_path, full_page=True)
+                    log(f"Error screenshot saved to: {screenshot_path}")
+                    
+                    html_path = os.path.join(output_dir, 'version_check_error_page.html')
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(page.content())
+                    log(f"Error page HTML saved to: {html_path}")
+                except Exception as debug_error:
+                    log(f"Could not save debug files: {debug_error}")
+            
             return None
         finally:
             browser.close()
@@ -455,11 +495,12 @@ Examples:
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Check current online version
-    current_version = get_current_version(args.url)
+    # Check current online version (with debug file saving)
+    current_version = get_current_version(args.url, output_dir=args.output_dir)
     
     if not current_version:
         log("Warning: Could not determine current version")
+        log(f"Check {args.output_dir} for debug files (screenshots, HTML)")
     
     # Check local version
     local_version = read_local_version(args.output_dir)
