@@ -51,6 +51,7 @@ COPY download_roblox.py /app/download_roblox.py
 COPY ecs_task.py /app/ecs_task.py
 COPY update_gameservers.py /app/update_gameservers.py
 COPY roblox_charts_scraper.py /app/roblox_charts_scraper.py
+COPY gamecategories.json /app/gamecategories.json
 
 # Create output directory
 RUN mkdir -p /downloads

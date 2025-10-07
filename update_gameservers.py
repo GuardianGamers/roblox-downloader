@@ -729,7 +729,16 @@ def update_gameservers(bucket_name: str, s3_prefix: str = "gameservers/", local_
         processed_games.extend(updated_legacy_games)
     
     # Save to S3 or local directory
-    save_path = save_gameservers_to_s3(processed_games, new_exclusions, bucket_name, s3_prefix, local_dir=local_dir)
+    # Default gamecategories path (in Docker it's /app/, locally it's in project root)
+    default_gamecategories_path = '/app/gamecategories.json' if os.path.exists('/app/gamecategories.json') else './gamecategories.json'
+    save_path = save_gameservers_to_s3(
+        processed_games, 
+        new_exclusions, 
+        bucket_name, 
+        s3_prefix, 
+        local_dir=local_dir,
+        gamecategories_path=default_gamecategories_path
+    )
     
     log("=" * 60)
     log(f"Gameservers update complete!")
