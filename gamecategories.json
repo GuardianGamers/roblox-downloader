@@ -1,0 +1,27 @@
+{
+    "version": 0,
+    "metaCategories": [
+        { "name": "Featured",           "games": [ "roblox" ],      "categories": [ "featured" ] },
+        { "name": "Top rated",          "games": [ "roblox" ],      "categories": [ "top-rated" ] },
+        { "name": "Most popular",       "games": [ "roblox" ],      "categories": [ "most-popular" ] },
+        { "name": "Top trending",       "games": [ "roblox" ],      "categories": [ "top-trending" ] },
+        { "name": "Top revisited",      "games": [ "roblox" ],      "categories": [ "top-revisited" ] },
+        { "name": "Up and coming",      "games": [ "roblox" ],      "categories": [ "up-and-coming" ] },
+        { "name": "Obby & Platform",    "games": [ "roblox" ],      "categories": [ "trending-in-obby-and-platform" ]},
+        { "name": "Simulation",         "games": [ "roblox" ],      "categories": [ "trending-in-simulation" ] },
+        { "name": "Sports & Racing",    "games": [ "roblox" ],      "categories": [ "trending-in-sports-and-racing" ] },
+        { "name": "Roleplay & Avatar simulation", "games": [ "roblox" ], "categories": [ "trending-in-roleplay-and-avatar-sim" ] },
+        { "name": "Party & Casual",     "games": [ "roblox" ],      "categories": [ "trending-in-party-and-casual" ] },
+        { "name": "Adventure",          "games": [ "roblox" ],      "categories": [ "trending-in-adventure" ] },
+        { "name": "Survival",           "games": [ "roblox" ],      "categories": [ "trending-in-survival" ] },
+        { "name": "Action",             "games": [ "roblox" ],      "categories": [ "trending-in-action" ] },
+        { "name": "Strategy",           "games": [ "roblox" ],      "categories": [ "trending-in-strategy" ] },
+        { "name": "Fun with friends",   "games": [ "roblox" ],      "categories": [ "fun-with-friends" ] },
+        { "name": "RPG",                "games": [ "roblox" ],      "categories": [ "trending-in-rpg" ] },
+        { "name": "Learning & Explore", "games": [ "roblox" ],      "categories": [ "learning-and-explore" ] },
+        { "name": "Entertainment",      "games": [ "roblox" ],      "categories": [ "trending-in-entertainment" ] },
+        { "name": "Music experiences",  "games": [ "roblox" ],      "categories": [ "trending-in-music-experiences" ] },
+        { "name": "Puzzle",             "games": [ "roblox" ],      "categories": [ "trending-in-puzzle" ] },
+        { "name": "Shopping",           "games": [ "roblox" ],      "categories": [ "trending-in-shopping" ] }
+    ]
+}

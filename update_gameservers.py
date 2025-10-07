@@ -370,16 +370,55 @@ def create_gameservers_zip(games: List[Dict], output_path: Path) -> None:
     
     log(f"Gameservers.zip created successfully: {output_path}")
 
+def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_path: str) -> None:
+    """
+    Create a metadata.zip file for public consumption with:
+    - gameservers.json (cleaned up - without orig_description, ai_flags, ai_reasoning)
+    - gamecategories.json
+    
+    Args:
+        games: List of game data
+        output_path: Path where the zip file should be created
+        gamecategories_path: Path to gamecategories.json file
+    """
+    log(f"Creating metadata.zip for public distribution...")
+    
+    # Clean up games data by removing internal fields
+    cleaned_games = []
+    for game in games:
+        cleaned_game = {k: v for k, v in game.items() 
+                       if k not in ['orig_description', 'ai_flags', 'ai_reasoning', 'needs_resanitization']}
+        cleaned_games.append(cleaned_game)
+    
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Add cleaned gameservers.json
+        gameservers_json = json.dumps(cleaned_games, indent=2)
+        zipf.writestr('gameservers.json', gameservers_json)
+        log(f"  Added gameservers.json ({len(cleaned_games)} games)")
+        
+        # Add gamecategories.json if it exists
+        gamecategories_file = Path(gamecategories_path)
+        if gamecategories_file.exists():
+            with open(gamecategories_file, 'r') as f:
+                gamecategories_data = f.read()
+            zipf.writestr('gamecategories.json', gamecategories_data)
+            log(f"  Added gamecategories.json")
+        else:
+            log(f"  Warning: gamecategories.json not found at {gamecategories_path}")
+    
+    log(f"Metadata.zip created successfully: {output_path}")
+
 def save_gameservers_to_s3(
     games: List[Dict],
     exclusions: Dict[str, Dict],
     bucket_name: str,
     s3_prefix: str,
-    local_dir: str = None
+    local_dir: str = None,
+    gamecategories_path: str = None
 ) -> str:
     """
     Save updated gameservers.json and exclusions to S3 or local directory with today's date.
-    Also creates a gameservers.zip file with individual game files.
+    Also creates gameservers.zip and metadata.zip files.
     
     Args:
         games: List of game data
@@ -387,11 +426,16 @@ def save_gameservers_to_s3(
         bucket_name: S3 bucket name
         s3_prefix: S3 prefix for gameservers data
         local_dir: Optional local directory path for testing (overrides S3)
+        gamecategories_path: Path to gamecategories.json file (defaults to ./gamecategories.json)
         
     Returns:
         Path where data was saved
     """
     today = datetime.utcnow().strftime('%Y-%m-%d')
+    
+    # Default gamecategories path if not specified
+    if gamecategories_path is None:
+        gamecategories_path = os.path.join(os.path.dirname(__file__), 'gamecategories.json')
     
     gameservers_data = json.dumps(games, indent=2)
     exclusions_data = json.dumps({
@@ -419,6 +463,10 @@ def save_gameservers_to_s3(
         # Create gameservers.zip
         zip_path = daily_dir / "gameservers.zip"
         create_gameservers_zip(games, zip_path)
+        
+        # Create metadata.zip
+        metadata_zip_path = daily_dir / "metadata.zip"
+        create_metadata_zip(games, metadata_zip_path, gamecategories_path)
         
         log(f"Saved {len(games)} games and {len(exclusions)} exclusions locally")
         return str(daily_dir)
@@ -467,6 +515,28 @@ def save_gameservers_to_s3(
         # Clean up temp file
         if tmp_zip_path.exists():
             tmp_zip_path.unlink()
+    
+    # Create and save metadata.zip
+    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.zip') as tmp_metadata:
+        tmp_metadata_path = Path(tmp_metadata.name)
+    
+    try:
+        create_metadata_zip(games, tmp_metadata_path, gamecategories_path)
+        
+        # Upload to S3
+        with open(tmp_metadata_path, 'rb') as f:
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f"{daily_prefix}metadata.zip",
+                Body=f.read(),
+                ContentType='application/zip',
+                ServerSideEncryption='AES256'
+            )
+        log(f"Uploaded metadata.zip to S3")
+    finally:
+        # Clean up temp file
+        if tmp_metadata_path.exists():
+            tmp_metadata_path.unlink()
     
     log(f"Saved {len(games)} games and {len(exclusions)} exclusions")
     return daily_prefix
