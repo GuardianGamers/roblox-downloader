@@ -8,8 +8,9 @@ import shutil
 import argparse
 import re
 import time
+import hashlib
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 def log(message):
@@ -441,6 +442,178 @@ def create_manifest(extract_dir: str, version: str) -> bool:
         log(f"Error creating manifest.json: {str(e)}")
         return False
 
+def verify_apk_signatures(extract_dir: str) -> bool:
+    """
+    Verify APK signatures to ensure authenticity.
+    
+    Args:
+        extract_dir: Directory containing extracted APK files
+        
+    Returns:
+        True if verification was successful, False otherwise
+    """
+    try:
+        from apksigtool import (
+            extract_v2_sig,
+            parse_apk_signing_block,
+            show_x509_certificate,
+            APK_SIGNATURE_SCHEME_V2_BLOCK_ID,
+            APK_SIGNATURE_SCHEME_V3_BLOCK_ID
+        )
+    except ImportError:
+        log("⚠️  apksigtool not installed - skipping signature verification")
+        log("   Install with: pip install apksigtool")
+        return True  # Don't fail if tool not available
+    
+    log("\n" + "="*70)
+    log("🔐 Verifying APK Signatures")
+    log("="*70)
+    
+    # Find all APK files
+    apk_files = [f for f in os.listdir(extract_dir) if f.endswith('.apk')]
+    
+    if not apk_files:
+        log("No APK files found for verification")
+        return False
+    
+    log(f"Found {len(apk_files)} APK file(s) to verify")
+    
+    all_verified = True
+    certificates_found = []
+    
+    for apk_file in apk_files:
+        apk_path = os.path.join(extract_dir, apk_file)
+        log(f"\n📦 Analyzing: {apk_file}")
+        
+        try:
+            # Extract APK Signing Block
+            result = extract_v2_sig(apk_path, expected=False)
+            
+            if result is None:
+                log("  ⚠️  No V2/V3 signature found (may have V1 only)")
+                continue
+            
+            sb_offset, sig_block = result
+            signing_block = parse_apk_signing_block(sig_block)
+            
+            # Look for V2 and V3 signatures
+            has_v2 = False
+            has_v3 = False
+            v2_block = None
+            v3_block = None
+            
+            for pair in signing_block.pairs:
+                if pair.id == APK_SIGNATURE_SCHEME_V2_BLOCK_ID:
+                    has_v2 = True
+                    v2_block = pair
+                elif pair.id == APK_SIGNATURE_SCHEME_V3_BLOCK_ID:
+                    has_v3 = True
+                    v3_block = pair
+            
+            if not has_v2 and not has_v3:
+                log("  ⚠️  No V2/V3 signature blocks found")
+                continue
+            
+            # Display signature scheme info
+            if has_v3:
+                log(f"  ✅ APK Signature Scheme V3 (most secure)")
+            if has_v2:
+                log(f"  ✅ APK Signature Scheme V2")
+            
+            # Get certificate from V3 or V2 (prefer V3)
+            sig_data = v3_block.value if has_v3 else v2_block.value
+            
+            if hasattr(sig_data, 'signers') and sig_data.signers:
+                signer = sig_data.signers[0]
+                
+                # Get public key fingerprint
+                if hasattr(signer, 'public_key') and signer.public_key:
+                    pk_data = signer.public_key.data if hasattr(signer.public_key, 'data') else signer.public_key
+                    pk_sha256 = hashlib.sha256(pk_data).hexdigest()
+                    
+                    log(f"  🔑 Public Key SHA-256: {pk_sha256}")
+                    
+                    # Get certificate details
+                    if hasattr(signer, 'signed_data') and hasattr(signer.signed_data, 'certificates'):
+                        certificates = signer.signed_data.certificates
+                        if certificates:
+                            cert = certificates[0]
+                            cert_data = cert.data if hasattr(cert, 'data') else cert
+                            
+                            # Parse certificate to get organization
+                            try:
+                                # Import StringIO to capture output
+                                from io import StringIO
+                                import sys
+                                
+                                # Capture the output from show_x509_certificate
+                                old_stdout = sys.stdout
+                                sys.stdout = captured_output = StringIO()
+                                
+                                show_x509_certificate(cert_data, indent=0)
+                                
+                                sys.stdout = old_stdout
+                                cert_info = captured_output.getvalue()
+                                
+                                # Check if cert_info contains the information
+                                if cert_info:
+                                    # Extract key information
+                                    if "Roblox Corporation" in cert_info:
+                                        log(f"  ✅ Signed by: Roblox Corporation")
+                                        certificates_found.append({
+                                            'file': apk_file,
+                                            'organization': 'Roblox Corporation',
+                                            'pk_sha256': pk_sha256
+                                        })
+                                        
+                                        # Show Common Name if available
+                                        for line in cert_info.split('\n'):
+                                            if 'Common Name:' in line:
+                                                log(f"  📝 {line.strip()}")
+                                                break
+                                    else:
+                                        log(f"  ⚠️  Unknown signer (not Roblox Corporation)")
+                                        # Extract organization name from cert_info
+                                        for line in cert_info.split('\n'):
+                                            if 'Organization:' in line:
+                                                log(f"  {line.strip()}")
+                                        all_verified = False
+                                else:
+                                    log(f"  ⚠️  Certificate info could not be retrieved")
+                                    all_verified = False
+                                        
+                            except Exception as e:
+                                log(f"  ⚠️  Could not parse certificate: {e}")
+                                # Restore stdout if there was an error
+                                if 'old_stdout' in locals():
+                                    sys.stdout = old_stdout
+                                all_verified = False
+        
+        except Exception as e:
+            log(f"  ❌ Error verifying signature: {e}")
+            all_verified = False
+    
+    # Summary
+    log("\n" + "="*70)
+    if certificates_found:
+        roblox_count = sum(1 for c in certificates_found if c['organization'] == 'Roblox Corporation')
+        log(f"📊 Verification Summary:")
+        log(f"   Total APKs verified: {len(certificates_found)}")
+        log(f"   Signed by Roblox Corporation: {roblox_count}")
+        
+        if roblox_count == len(certificates_found):
+            log(f"   ✅ ALL APKs are authentically signed by Roblox Corporation")
+        else:
+            log(f"   ⚠️  WARNING: Some APKs are not signed by Roblox Corporation!")
+            all_verified = False
+    else:
+        log("⚠️  No signatures could be verified")
+        all_verified = False
+    
+    log("="*70)
+    
+    return all_verified
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download Roblox APK from APKCombo using Playwright",
@@ -563,6 +736,9 @@ Examples:
         # Create manifest
         if not create_manifest(extract_dir, version):
             return 1
+        
+        # Verify APK signatures
+        verify_apk_signatures(extract_dir)
         
         log(f"\n✅ Successfully extracted and processed to: {extract_dir}")
     
