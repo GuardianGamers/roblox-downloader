@@ -472,8 +472,8 @@ def create_metadata_zip(games: List[Dict], output_path: Path, gamecategories_pat
             webp_data = download_and_convert_image(cleaned_game['img'], max_size_kb=100)
             if webp_data:
                 downloaded_images[game_id] = webp_data
-                # Update img path to local path
-                cleaned_game['img'] = f"/images/{game_id}.webp"
+                # Update img path to local path (metadata.zip is extracted to /metadata/)
+                cleaned_game['img'] = f"/metadata/images/{game_id}.webp"
                 size_kb = len(webp_data) / 1024
                 log(f"    ✓ Converted to WebP ({size_kb:.1f}KB)")
             else:
